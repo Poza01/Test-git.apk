@@ -16,10 +16,15 @@ class NovelTtsBridge(
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
 
+    init {
+        activeBridge = this
+    }
+
     var onUtteranceEvent: ((event: String, utteranceId: String) -> Unit)? = null
     var onTranslationStatusChange: ((status: String, lang: String) -> Unit)? = null
 
     fun attachServiceListener() {
+        activeBridge = this
         val service = getService() ?: TtsForegroundService.instance ?: return
         service.onUtteranceEvent = { event, utteranceId ->
             mainHandler.post {
@@ -27,6 +32,92 @@ class NovelTtsBridge(
                 val js = "if (window.__android_tts_callback) { window.__android_tts_callback('$event', '$cleanId'); }"
                 getWebView()?.evaluateJavascript(js, null)
             }
+        }
+    }
+
+    fun onNextFromNotification() {
+        mainHandler.post {
+            getWebView()?.evaluateJavascript("""
+                (function() {
+                    const selectors = [
+                        '#next_url', '.next_page', '#next-chapter', '.next-chapter', '.btn-next',
+                        'a[rel="next"]', 'button.next', 'a.next'
+                    ];
+                    for (let s of selectors) {
+                        let el = document.querySelector(s);
+                        if (el) { el.click(); return 'clicked_' + s; }
+                    }
+                    const xpathList = [
+                        "//a[contains(text(), 'ตอนต่อไป') or contains(text(), 'บทถัดไป') or contains(text(), 'ถัดไป')]",
+                        "//a[contains(text(), '下一章') or contains(text(), '下一页') or contains(text(), 'Next Chapter') or contains(text(), 'Next')]",
+                        "//button[contains(text(), 'ตอนต่อไป') or contains(text(), 'บทถัดไป') or contains(text(), 'ถัดไป') or contains(text(), 'Next')]"
+                    ];
+                    for (let xp of xpathList) {
+                        let res = document.evaluate(xp, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                        if (res) { res.click(); return 'clicked_xpath'; }
+                    }
+                    window.scrollBy({ top: window.innerHeight * 0.75, behavior: 'smooth' });
+                    return 'scrolled';
+                })();
+            """.trimIndent(), null)
+        }
+    }
+
+    fun onPrevFromNotification() {
+        mainHandler.post {
+            getWebView()?.evaluateJavascript("""
+                (function() {
+                    const selectors = [
+                        '#prev_url', '.prev_page', '#prev-chapter', '.prev-chapter', '.btn-prev',
+                        'a[rel="prev"]', 'button.prev', 'a.prev'
+                    ];
+                    for (let s of selectors) {
+                        let el = document.querySelector(s);
+                        if (el) { el.click(); return 'clicked_' + s; }
+                    }
+                    const xpathList = [
+                        "//a[contains(text(), 'ตอนก่อนหน้า') or contains(text(), 'บทก่อนหน้า') or contains(text(), 'ก่อนหน้า')]",
+                        "//a[contains(text(), '上一章') or contains(text(), '上一页') or contains(text(), 'Previous Chapter') or contains(text(), 'Prev')]",
+                        "//button[contains(text(), 'ตอนก่อนหน้า') or contains(text(), 'บทก่อนหน้า') or contains(text(), 'ก่อนหน้า') or contains(text(), 'Prev')]"
+                    ];
+                    for (let xp of xpathList) {
+                        let res = document.evaluate(xp, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                        if (res) { res.click(); return 'clicked_xpath'; }
+                    }
+                    window.scrollBy({ top: -window.innerHeight * 0.75, behavior: 'smooth' });
+                    return 'scrolled';
+                })();
+            """.trimIndent(), null)
+        }
+    }
+
+    fun onResumeFromNotification() {
+        mainHandler.post {
+            getWebView()?.evaluateJavascript("""
+                (function() {
+                    if (window.speechSynthesis) {
+                        window.speechSynthesis.paused = false;
+                        window.speechSynthesis.speaking = true;
+                    }
+                    const playBtn = document.querySelector('.tts-play, .btn-play, [data-action="play"], #play-button');
+                    if (playBtn) { playBtn.click(); }
+                })();
+            """.trimIndent(), null)
+        }
+    }
+
+    fun onPauseFromNotification() {
+        mainHandler.post {
+            getWebView()?.evaluateJavascript("""
+                (function() {
+                    if (window.speechSynthesis) {
+                        window.speechSynthesis.paused = true;
+                        window.speechSynthesis.speaking = false;
+                    }
+                    const pauseBtn = document.querySelector('.tts-pause, .btn-pause, [data-action="pause"], #pause-button');
+                    if (pauseBtn) { pauseBtn.click(); }
+                })();
+            """.trimIndent(), null)
         }
     }
 
@@ -189,6 +280,26 @@ class NovelTtsBridge(
 
     companion object {
         const val JS_INTERFACE_NAME = "AndroidTtsBridge"
+
+        @Volatile
+        var activeBridge: NovelTtsBridge? = null
+            private set
+
+        fun notifyNextFromService() {
+            activeBridge?.onNextFromNotification()
+        }
+
+        fun notifyPrevFromService() {
+            activeBridge?.onPrevFromNotification()
+        }
+
+        fun notifyPlayResumeFromService() {
+            activeBridge?.onResumeFromNotification()
+        }
+
+        fun notifyPauseFromService() {
+            activeBridge?.onPauseFromNotification()
+        }
 
         /**
          * Comprehensive Web Speech API (SpeechSynthesis & SpeechSynthesisUtterance) Polyfill Script
@@ -549,7 +660,8 @@ class NovelTtsBridge(
                         }
                     };
 
-                    loadGoogleTranslateScript();
+                    // Only prepare environment, script loads when user presses Translate
+                    ensureTranslateElement();
                 } catch(err) {
                     console.error("Translate engine setup error", err);
                 }

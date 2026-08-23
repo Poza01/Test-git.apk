@@ -36,8 +36,6 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.NotificationsActive
-import androidx.compose.material.icons.filled.NotificationsNone
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -83,8 +81,6 @@ import com.example.ui.theme.DarkSurface
 @Composable
 fun WebCompanionScreen(
     service: TtsForegroundService?,
-    isPlayerBarDismissed: Boolean = false,
-    onTogglePlayerBar: () -> Unit = {},
     onNavigateToBackgroundSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -347,48 +343,6 @@ fun WebCompanionScreen(
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
                                 color = if (isTranslateBarVisible || isTranslated) Color.White else Color(0xFFD1D5DB),
-                                fontSize = 11.sp
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.width(6.dp))
-
-                    // Action button: Toggle In-App Player Floating Bar
-                    val isOverlayActive = !isPlayerBarDismissed
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(
-                                if (isOverlayActive) {
-                                    Brush.horizontalGradient(listOf(AmberPrimary, AmberSecondary))
-                                } else {
-                                    Brush.horizontalGradient(listOf(Color(0xFF222222), Color(0xFF222222)))
-                                }
-                            )
-                            .border(
-                                width = 1.dp,
-                                color = if (isOverlayActive) AmberPrimary else DarkBorder,
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                            .clickable { onTogglePlayerBar() }
-                            .padding(horizontal = 8.dp, vertical = 5.dp)
-                            .testTag("toggle_player_overlay_button"),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = if (isOverlayActive) Icons.Default.NotificationsActive else Icons.Default.NotificationsNone,
-                                contentDescription = if (isOverlayActive) "แถบควบคุมเสียง: แสดง" else "แถบควบคุมเสียง: ซ่อน",
-                                tint = if (isOverlayActive) Color(0xFF0F0F0F) else Color(0xFFD1D5DB),
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = if (isOverlayActive) "แถบเสียง: เปิด" else "แถบเสียง: ปิด",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = if (isOverlayActive) Color(0xFF0F0F0F) else Color(0xFFD1D5DB),
                                 fontSize = 11.sp
                             )
                         }

@@ -32,10 +32,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.zIndex
 import androidx.core.content.ContextCompat
 import com.example.service.TtsForegroundService
-import com.example.service.TtsPlaybackState
 import com.example.ui.components.AppBottomNav
 import com.example.ui.components.AppScreen
-import com.example.ui.components.FloatingPlayerBar
 import com.example.ui.screens.HyperOsGuideScreen
 import com.example.ui.screens.VoiceSettingsScreen
 import com.example.ui.screens.WebCompanionScreen
@@ -121,17 +119,6 @@ fun MainAppContainer(
     service: TtsForegroundService?
 ) {
     var currentScreen by remember { mutableStateOf(AppScreen.WEB_READER) }
-    val playbackState = service?.playbackState?.collectAsState()?.value ?: TtsPlaybackState()
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val prefs = remember(context) { com.example.data.NovelPreferences(context) }
-    var isPlayerBarDismissed by remember { mutableStateOf(prefs.isPlayerBarDismissed) }
-
-    val cycleRate: () -> Unit = {
-        val rates = listOf(1.0f, 1.25f, 1.5f, 1.75f, 2.0f, 0.75f)
-        val currentRate = playbackState.speechRate
-        val nextRate = rates.firstOrNull { it > currentRate + 0.05f } ?: rates.first()
-        service?.setSpeechRate(nextRate)
-    }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -164,12 +151,6 @@ fun MainAppContainer(
             ) {
                 WebCompanionScreen(
                     service = service,
-                    isPlayerBarDismissed = isPlayerBarDismissed,
-                    onTogglePlayerBar = {
-                        val newValue = !isPlayerBarDismissed
-                        isPlayerBarDismissed = newValue
-                        prefs.isPlayerBarDismissed = newValue
-                    },
                     onNavigateToBackgroundSettings = { currentScreen = AppScreen.BACKGROUND_SETTINGS }
                 )
             }
@@ -201,27 +182,6 @@ fun MainAppContainer(
                     )
                 }
             }
-
-            // Global Floating Player Bar (shown whenever playing/paused and not dismissed)
-            FloatingPlayerBar(
-                state = playbackState,
-                isDismissed = isPlayerBarDismissed,
-                onTogglePlayPause = {
-                    if (playbackState.isPlaying) service?.pause() else service?.resume()
-                },
-                onSkipNext = { service?.skipNext() },
-                onSkipPrev = { service?.skipPrevious() },
-                onStop = {
-                    service?.stop()
-                },
-                onCycleRate = cycleRate,
-                onDismissOverlay = {
-                    isPlayerBarDismissed = true
-                    prefs.isPlayerBarDismissed = true
-                },
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-            )
         }
     }
 }

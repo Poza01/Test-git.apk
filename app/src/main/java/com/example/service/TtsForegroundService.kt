@@ -96,17 +96,6 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
-            // Configure clean AudioAttributes to avoid audio crackling / distortion
-            try {
-                val audioAttributes = android.media.AudioAttributes.Builder()
-                    .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
-                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
-                    .build()
-                tts?.setAudioAttributes(audioAttributes)
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to set audio attributes", e)
-            }
-
             val thaiLocale = Locale("th", "TH")
             val langResult = tts?.setLanguage(thaiLocale)
 
@@ -116,11 +105,6 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
             }
 
             val defaultEngine = tts?.defaultEngine ?: "Android TTS"
-            val savedRate = prefs.defaultRate.coerceIn(0.75f, 2.0f)
-            val savedPitch = prefs.defaultPitch.coerceIn(0.8f, 1.2f)
-
-            tts?.setSpeechRate(savedRate)
-            tts?.setPitch(savedPitch)
 
             _playbackState.update { current ->
                 current.copy(
@@ -128,14 +112,14 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
                     engineName = defaultEngine,
                     availableVoices = emptyList(),
                     selectedVoiceName = "ค่าเริ่มต้นของระบบ ROM",
-                    speechRate = savedRate,
-                    speechPitch = savedPitch
+                    speechRate = 1.0f,
+                    speechPitch = 1.0f
                 )
             }
 
             setupUtteranceListener()
             updateForegroundNotification()
-            Log.d(TAG, "TextToSpeech initialized with engine=$defaultEngine, rate=$savedRate, pitch=$savedPitch")
+            Log.d(TAG, "TextToSpeech initialized with raw native engine=$defaultEngine")
 
             // Execute any pending speech requested before initialization was complete
             val pending = pendingSpeechAction
@@ -265,14 +249,6 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
 
         startAsForegroundService()
 
-        val selectedVoice = _playbackState.value.selectedVoiceName
-        if (!selectedVoice.isNullOrBlank()) {
-            val target = tts?.voices?.find { it.name == selectedVoice }
-            if (target != null) tts?.voice = target
-        }
-        tts?.setSpeechRate(_playbackState.value.speechRate)
-        tts?.setPitch(_playbackState.value.speechPitch)
-
         val utteranceId = "web_utt_$webUtteranceId"
         tts?.speak(cleanText, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
     }
@@ -298,14 +274,6 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
 
         updateForegroundNotification()
 
-        val selectedVoice = _playbackState.value.selectedVoiceName
-        if (!selectedVoice.isNullOrBlank()) {
-            val target = tts?.voices?.find { it.name == selectedVoice }
-            if (target != null) tts?.voice = target
-        }
-        tts?.setSpeechRate(_playbackState.value.speechRate)
-        tts?.setPitch(_playbackState.value.speechPitch)
-
         currentUtteranceId++
         val utteranceId = "novel_tts_${currentUtteranceId}_$index"
 
@@ -316,6 +284,7 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
         tts?.stop()
         _playbackState.update { it.copy(isPlaying = false, isPaused = true) }
         updateForegroundNotification()
+        com.example.bridge.NovelTtsBridge.notifyPauseFromService()
     }
 
     fun resume() {
@@ -326,7 +295,15 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
         } else if (state.paragraphs.isNotEmpty()) {
             startAsForegroundService()
             speakParagraphInternal(0)
+        } else if (state.currentText.isNotBlank()) {
+            startAsForegroundService()
+            _playbackState.update { it.copy(isPlaying = true, isPaused = false) }
+            updateForegroundNotification()
+            currentUtteranceId++
+            val utteranceId = "web_utt_resume_$currentUtteranceId"
+            tts?.speak(state.currentText, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
         }
+        com.example.bridge.NovelTtsBridge.notifyPlayResumeFromService()
     }
 
     fun stop() {
@@ -341,20 +318,27 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
             )
         }
         updateForegroundNotification()
+        com.example.bridge.NovelTtsBridge.notifyPauseFromService()
     }
 
     fun skipNext() {
         val state = _playbackState.value
-        if (state.paragraphs.isEmpty()) return
-        val nextIndex = (state.activeParagraphIndex + 1).coerceAtMost(state.paragraphs.size - 1)
-        speakParagraphInternal(nextIndex)
+        if (state.paragraphs.isNotEmpty() && state.activeParagraphIndex < state.paragraphs.size - 1) {
+            val nextIndex = (state.activeParagraphIndex + 1).coerceAtMost(state.paragraphs.size - 1)
+            speakParagraphInternal(nextIndex)
+        } else {
+            com.example.bridge.NovelTtsBridge.notifyNextFromService()
+        }
     }
 
     fun skipPrevious() {
         val state = _playbackState.value
-        if (state.paragraphs.isEmpty()) return
-        val prevIndex = (state.activeParagraphIndex - 1).coerceAtLeast(0)
-        speakParagraphInternal(prevIndex)
+        if (state.paragraphs.isNotEmpty() && state.activeParagraphIndex > 0) {
+            val prevIndex = (state.activeParagraphIndex - 1).coerceAtLeast(0)
+            speakParagraphInternal(prevIndex)
+        } else {
+            com.example.bridge.NovelTtsBridge.notifyPrevFromService()
+        }
     }
 
     fun setSpeechRate(rate: Float) {
