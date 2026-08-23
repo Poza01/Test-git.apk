@@ -16,8 +16,11 @@ class NovelTtsBridge(
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
 
+    var onUtteranceEvent: ((event: String, utteranceId: String) -> Unit)? = null
+    var onTranslationStatusChange: ((status: String, lang: String) -> Unit)? = null
+
     fun attachServiceListener() {
-        val service = getService() ?: return
+        val service = getService() ?: TtsForegroundService.instance ?: return
         service.onUtteranceEvent = { event, utteranceId ->
             mainHandler.post {
                 val cleanId = utteranceId.removePrefix("web_utt_")
@@ -28,12 +31,48 @@ class NovelTtsBridge(
     }
 
     @JavascriptInterface
+    fun onTranslationStatus(status: String?, lang: String?) {
+        val s = status ?: ""
+        val l = lang ?: ""
+        mainHandler.post {
+            onTranslationStatusChange?.invoke(s, l)
+        }
+    }
+
+    fun translatePage(targetLang: String = "th") {
+        mainHandler.post {
+            val js = """
+                (function() {
+                    if (typeof window.__chrome_translate_to === 'function') {
+                        window.__chrome_translate_to('$targetLang');
+                    }
+                })();
+            """.trimIndent()
+            getWebView()?.evaluateJavascript(js, null)
+        }
+    }
+
+    fun restoreOriginal() {
+        mainHandler.post {
+            val js = """
+                (function() {
+                    if (typeof window.__chrome_translate_restore === 'function') {
+                        window.__chrome_translate_restore();
+                    }
+                })();
+            """.trimIndent()
+            getWebView()?.evaluateJavascript(js, null)
+        }
+    }
+
+    @JavascriptInterface
     fun speakFromWeb(text: String?, title: String?, utteranceId: String?) {
         if (text.isNullOrBlank()) return
         val uttId = utteranceId ?: "0"
         mainHandler.post {
             attachServiceListener()
-            getService()?.speakFromWeb(text, title ?: "อ่านนิยายเว็บ", uttId)
+            val service = getService() ?: TtsForegroundService.instance
+            service?.speakFromWeb(text, title ?: "อ่านนิยายเว็บ", uttId)
         }
     }
 
@@ -42,7 +81,8 @@ class NovelTtsBridge(
         if (text.isNullOrBlank()) return
         mainHandler.post {
             attachServiceListener()
-            getService()?.playSingleText(text, title ?: "อ่านนิยาย")
+            val service = getService() ?: TtsForegroundService.instance
+            service?.playSingleText(text, title ?: "อ่านนิยาย")
         }
     }
 
@@ -58,59 +98,88 @@ class NovelTtsBridge(
             }
             mainHandler.post {
                 attachServiceListener()
-                getService()?.playPlaylist(list, title ?: "อ่านนิยาย", startIndex)
+                val service = getService() ?: TtsForegroundService.instance
+                service?.playPlaylist(list, title ?: "อ่านนิยาย", startIndex)
             }
         } catch (e: Exception) {
             mainHandler.post {
                 attachServiceListener()
-                getService()?.playSingleText(paragraphsJson, title ?: "อ่านนิยาย")
+                val service = getService() ?: TtsForegroundService.instance
+                service?.playSingleText(paragraphsJson, title ?: "อ่านนิยาย")
             }
         }
     }
 
     @JavascriptInterface
     fun pause() {
-        mainHandler.post { getService()?.pause() }
+        mainHandler.post {
+            val service = getService() ?: TtsForegroundService.instance
+            service?.pause()
+        }
     }
 
     @JavascriptInterface
     fun resume() {
-        mainHandler.post { getService()?.resume() }
+        mainHandler.post {
+            val service = getService() ?: TtsForegroundService.instance
+            service?.resume()
+        }
     }
 
     @JavascriptInterface
     fun stop() {
-        mainHandler.post { getService()?.stop() }
+        mainHandler.post {
+            val service = getService() ?: TtsForegroundService.instance
+            service?.stop()
+        }
     }
 
     @JavascriptInterface
     fun setRate(rate: Float) {
-        mainHandler.post { getService()?.setSpeechRate(rate) }
+        mainHandler.post {
+            val service = getService() ?: TtsForegroundService.instance
+            service?.setSpeechRate(rate)
+        }
     }
 
     @JavascriptInterface
     fun setPitch(pitch: Float) {
-        mainHandler.post { getService()?.setSpeechPitch(pitch) }
+        mainHandler.post {
+            val service = getService() ?: TtsForegroundService.instance
+            service?.setSpeechPitch(pitch)
+        }
     }
 
     @JavascriptInterface
     fun setVoice(voiceName: String?) {
         if (voiceName.isNullOrBlank()) return
-        mainHandler.post { getService()?.setVoice(voiceName) }
+        mainHandler.post {
+            val service = getService() ?: TtsForegroundService.instance
+            service?.setVoice(voiceName)
+        }
     }
 
     @JavascriptInterface
     fun getAvailableVoicesJson(): String {
-        val service = getService() ?: return "[]"
-        val voices = service.playbackState.value.availableVoices
+        val service = getService() ?: TtsForegroundService.instance
+        val voices = service?.playbackState?.value?.availableVoices ?: emptyList()
         val jsonArray = JSONArray()
-        for (v in voices) {
-            val obj = JSONObject().apply {
-                put("name", v.name)
-                put("locale", v.locale)
-                put("quality", v.quality)
+        if (voices.isNotEmpty()) {
+            for (v in voices) {
+                val obj = JSONObject().apply {
+                    put("name", v.name)
+                    put("locale", v.locale)
+                    put("quality", v.quality)
+                }
+                jsonArray.put(obj)
             }
-            jsonArray.put(obj)
+        } else {
+            val defaultThai = JSONObject().apply {
+                put("name", "th-th-x-default")
+                put("locale", "th_TH")
+                put("quality", "Thai Voice (Auto Sync)")
+            }
+            jsonArray.put(defaultThai)
         }
         return jsonArray.toString()
     }
@@ -246,10 +315,10 @@ class NovelTtsBridge(
                                 const id = "utt_" + (++uttCounter);
                                 window.__android_tts_utterances[id] = utterance;
 
-                                if (utterance.rate && window.AndroidTtsBridge && window.AndroidTtsBridge.setRate) {
+                                if (utterance.rate && utterance.rate !== 1.0 && window.AndroidTtsBridge && window.AndroidTtsBridge.setRate) {
                                     window.AndroidTtsBridge.setRate(utterance.rate);
                                 }
-                                if (utterance.pitch && window.AndroidTtsBridge && window.AndroidTtsBridge.setPitch) {
+                                if (utterance.pitch && utterance.pitch !== 1.0 && window.AndroidTtsBridge && window.AndroidTtsBridge.setPitch) {
                                     window.AndroidTtsBridge.setPitch(utterance.pitch);
                                 }
                                 if (utterance.voice && utterance.voice.name && window.AndroidTtsBridge && window.AndroidTtsBridge.setVoice) {
@@ -302,14 +371,23 @@ class NovelTtsBridge(
                     });
 
                     // Dispatch onvoiceschanged
-                    setTimeout(function() {
+                    function triggerVoicesChanged() {
                         try {
+                            updateVoicesFromBridge();
                             if (window.speechSynthesis && typeof window.speechSynthesis.onvoiceschanged === 'function') {
                                 window.speechSynthesis.onvoiceschanged();
                             }
                             window.dispatchEvent(new Event('voiceschanged'));
                         } catch(e) {}
-                    }, 50);
+                    }
+
+                    window.__android_tts_sync_ready = function() {
+                        triggerVoicesChanged();
+                    };
+
+                    triggerVoicesChanged();
+                    setTimeout(triggerVoicesChanged, 50);
+                    setTimeout(triggerVoicesChanged, 300);
 
                     // 5. Expose convenient novel reader helper functions
                     window.readWithAndroidTts = function(text, title) {
@@ -330,6 +408,150 @@ class NovelTtsBridge(
                     console.log("[NovelAI Android Bridge] Bidirectional Web Speech Polyfill successfully installed.");
                 } catch(globalErr) {
                     console.error("[NovelAI Bridge Fatal]", globalErr);
+                }
+            })();
+        """
+
+        /**
+         * Google Chrome-style Webpage Translation Injection Engine
+         * Embeds Google Translate Element cleanly, strips unwanted banners/styles,
+         * translates the entire DOM in-place to Thai/target language so reading and TTS work seamlessly.
+         */
+        const val TRANSLATE_INJECTION_SCRIPT = """
+            (function() {
+                if (window.__chrome_translate_installed) return;
+                window.__chrome_translate_installed = true;
+
+                try {
+                    // 1. Clean up Google styles to hide iframe / banners
+                    var style = document.createElement('style');
+                    style.id = 'chrome-translate-style';
+                    style.innerHTML = `
+                        .goog-te-banner-frame { display: none !important; }
+                        .goog-te-banner-frame.skiptranslate { display: none !important; }
+                        .goog-te-gadget { display: none !important; font-size: 0px !important; }
+                        .goog-te-gadget span { display: none !important; }
+                        .goog-tooltip { display: none !important; }
+                        .goog-tooltip:hover { display: none !important; }
+                        .goog-text-highlight { background-color: transparent !important; box-shadow: none !important; }
+                        body { top: 0px !important; position: static !important; }
+                        #goog-gt-tt { display: none !important; }
+                        #google_translate_element { display: none !important; }
+                        .skiptranslate iframe { display: none !important; }
+                    `;
+                    (document.head || document.documentElement).appendChild(style);
+
+                    // 2. Prepare hidden container
+                    function ensureTranslateElement() {
+                        if (!document.getElementById('google_translate_element')) {
+                            var div = document.createElement('div');
+                            div.id = 'google_translate_element';
+                            div.style.display = 'none';
+                            (document.body || document.documentElement).appendChild(div);
+                        }
+                    }
+
+                    // 3. Init Google translate callback
+                    window.googleTranslateElementInit = function() {
+                        try {
+                            new google.translate.TranslateElement({
+                                pageLanguage: 'auto',
+                                autoDisplay: false,
+                                multilanguagePage: true
+                            }, 'google_translate_element');
+                            if (window.AndroidTtsBridge && window.AndroidTtsBridge.onTranslationStatus) {
+                                window.AndroidTtsBridge.onTranslationStatus('ready', '');
+                            }
+                        } catch(e) {
+                            console.error('Google Translate Init Error', e);
+                        }
+                    };
+
+                    // 4. Load Google Translate SDK
+                    function loadGoogleTranslateScript() {
+                        ensureTranslateElement();
+                        if (!document.getElementById('google-translate-script')) {
+                            var script = document.createElement('script');
+                            script.id = 'google-translate-script';
+                            script.src = 'https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit';
+                            script.async = true;
+                            (document.head || document.documentElement).appendChild(script);
+                        }
+                    }
+
+                    // 5. Trigger Translation
+                    window.__chrome_translate_to = function(targetLang) {
+                        try {
+                            ensureTranslateElement();
+                            loadGoogleTranslateScript();
+
+                            if (window.AndroidTtsBridge && window.AndroidTtsBridge.onTranslationStatus) {
+                                window.AndroidTtsBridge.onTranslationStatus('translating', targetLang);
+                            }
+
+                            var attempts = 0;
+                            var interval = setInterval(function() {
+                                attempts++;
+                                var select = document.querySelector('.goog-te-combo');
+                                if (select) {
+                                    clearInterval(interval);
+                                    select.value = targetLang;
+                                    select.dispatchEvent(new Event('change'));
+                                    if (window.AndroidTtsBridge && window.AndroidTtsBridge.onTranslationStatus) {
+                                        window.AndroidTtsBridge.onTranslationStatus('translated', targetLang);
+                                    }
+                                } else if (attempts > 25) {
+                                    clearInterval(interval);
+                                    // Fallback: Cookie method
+                                    document.cookie = "googtrans=/auto/" + targetLang + "; path=/; domain=" + location.hostname;
+                                    document.cookie = "googtrans=/auto/" + targetLang + "; path=/;";
+                                    if (window.AndroidTtsBridge && window.AndroidTtsBridge.onTranslationStatus) {
+                                        window.AndroidTtsBridge.onTranslationStatus('translated', targetLang);
+                                    }
+                                }
+                            }, 120);
+                        } catch(e) {
+                            console.error("Translate error", e);
+                            if (window.AndroidTtsBridge && window.AndroidTtsBridge.onTranslationStatus) {
+                                window.AndroidTtsBridge.onTranslationStatus('error', e.message);
+                            }
+                        }
+                    };
+
+                    // 6. Restore Original
+                    window.__chrome_translate_restore = function() {
+                        try {
+                            var select = document.querySelector('.goog-te-combo');
+                            if (select) {
+                                var origOption = select.querySelector('option[value=""]') || select.options[0];
+                                if (origOption) {
+                                    select.value = origOption.value;
+                                    select.dispatchEvent(new Event('change'));
+                                }
+                            }
+                            document.cookie = "googtrans=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; domain=" + location.hostname;
+                            document.cookie = "googtrans=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+
+                            var iframe = document.querySelector('.goog-te-banner-frame');
+                            if (iframe) {
+                                try {
+                                    var innerDoc = iframe.contentDocument || iframe.contentWindow.document;
+                                    var restoreBtn = innerDoc.querySelector('.goog-te-button button');
+                                    if (restoreBtn) restoreBtn.click();
+                                } catch(e){}
+                            }
+
+                            if (window.AndroidTtsBridge && window.AndroidTtsBridge.onTranslationStatus) {
+                                window.AndroidTtsBridge.onTranslationStatus('original', '');
+                            }
+                        } catch(e) {
+                            console.error("Restore error", e);
+                        }
+                    };
+
+                    loadGoogleTranslateScript();
+                } catch(err) {
+                    console.error("Translate engine setup error", err);
                 }
             })();
         """

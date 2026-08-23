@@ -1,6 +1,6 @@
 {
-  "name": "NovelAI TTS",
-  "description": "เครื่องมือเปิดเว็บแปลนิยายและอ่านออกเสียงภาษาไทยเบื้องหลังไม่ดับ รองรับ HyperOS 2",
+  "name": "TTS เบื้องหลัง",
+  "description": "แอปอ่านนิยายและหน้าเว็บแปลไทยด้วยระบบ Text-to-Speech ทำงานเบื้องหลังต่อเนื่องไม่ดับ",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

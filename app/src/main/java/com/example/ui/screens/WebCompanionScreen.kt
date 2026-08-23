@@ -36,7 +36,9 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.NotificationsNone
+import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -47,10 +49,12 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -69,6 +73,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.example.bridge.NovelTtsBridge
 import com.example.data.NovelPreferences
 import com.example.service.TtsForegroundService
+import com.example.ui.components.ChromeTranslateBar
 import com.example.ui.theme.AmberPrimary
 import com.example.ui.theme.AmberSecondary
 import com.example.ui.theme.DarkBorder
@@ -78,7 +83,9 @@ import com.example.ui.theme.DarkSurface
 @Composable
 fun WebCompanionScreen(
     service: TtsForegroundService?,
-    onNavigateToHyperOsGuide: () -> Unit,
+    isPlayerBarDismissed: Boolean = false,
+    onTogglePlayerBar: () -> Unit = {},
+    onNavigateToBackgroundSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -92,18 +99,56 @@ fun WebCompanionScreen(
     var canGoBack by remember { mutableStateOf(false) }
     var canGoForward by remember { mutableStateOf(false) }
 
+    var isTranslateBarVisible by remember { mutableStateOf(prefs.showTranslateBar) }
+    var isTranslated by remember { mutableStateOf(false) }
+    var isTranslating by remember { mutableStateOf(false) }
+    var targetLang by remember { mutableStateOf(prefs.targetLanguage) }
+    var isAutoTranslate by remember { mutableStateOf(prefs.isAutoTranslate) }
+
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
 
+    val currentService by rememberUpdatedState(service)
     val bridge = remember {
         NovelTtsBridge(
             context = context,
-            getService = { service },
+            getService = { currentService ?: TtsForegroundService.instance },
             getWebView = { webViewInstance }
         )
     }
 
-    androidx.compose.runtime.LaunchedEffect(service, webViewInstance) {
+    LaunchedEffect(service, webViewInstance) {
         bridge.attachServiceListener()
+        webViewInstance?.evaluateJavascript("""
+            (function() {
+                if (window.__android_tts_sync_ready) {
+                    window.__android_tts_sync_ready();
+                }
+            })();
+        """.trimIndent(), null)
+
+        bridge.onTranslationStatusChange = { status, lang ->
+            when (status) {
+                "translating" -> {
+                    isTranslating = true
+                }
+                "translated" -> {
+                    isTranslating = false
+                    isTranslated = true
+                }
+                "original" -> {
+                    isTranslating = false
+                    isTranslated = false
+                }
+                "ready" -> {
+                    if (isAutoTranslate) {
+                        bridge.translatePage(targetLang)
+                    }
+                }
+                "error" -> {
+                    isTranslating = false
+                }
+            }
+        }
     }
 
     Column(
@@ -235,7 +280,7 @@ fun WebCompanionScreen(
                 )
             }
 
-            // Quick Native Action Bar: Extract & Read Webpage Paragraphs
+            // Quick Native Action Bar: Page status + Google Translate button + In-App Player toggle
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -264,69 +309,89 @@ fun WebCompanionScreen(
                     )
                 }
 
-                // Action button: Read aloud with Android Native Service
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(
-                            Brush.horizontalGradient(
-                                listOf(AmberPrimary, AmberSecondary)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // Google Translate Toggle Button
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(
+                                if (isTranslateBarVisible || isTranslated) {
+                                    Brush.horizontalGradient(listOf(Color(0xFF0284C7), Color(0xFF0EA5E9)))
+                                } else {
+                                    Brush.horizontalGradient(listOf(Color(0xFF222222), Color(0xFF222222)))
+                                }
                             )
-                        )
-                        .clickable {
-                            // Extract paragraphs from novel reader webpage
-                            val jsExtract = """
-                                (function() {
-                                    try {
-                                        let title = document.title || "นิยาย";
-                                        let h1 = document.querySelector('h1, h2, .novel-title, .chapter-title');
-                                        if (h1 && h1.innerText) title = h1.innerText.trim();
-
-                                        let paragraphs = [];
-                                        // 1. Look for translated / reader paragraphs in novel reader
-                                        let elements = document.querySelectorAll('p, [data-para-key], .translated-text, article p, .reading-content p');
-                                        elements.forEach(el => {
-                                            let text = el.innerText ? el.innerText.trim() : '';
-                                            if (text.length > 5 && !text.includes('javascript:') && !text.includes('Cookie')) {
-                                                paragraphs.push(text);
-                                            }
-                                        });
-
-                                        if (paragraphs.length === 0) {
-                                            // Fallback: full body text
-                                            paragraphs = (document.body.innerText || '').split('\n').filter(s => s.trim().length > 5);
-                                        }
-
-                                        if (window.AndroidTtsBridge && paragraphs.length > 0) {
-                                            window.AndroidTtsBridge.speakParagraphs(JSON.stringify(paragraphs.slice(0, 200)), title, 0);
-                                        } else if (window.AndroidTtsBridge) {
-                                            window.AndroidTtsBridge.speak(document.body.innerText || "ไม่พบข้อความ", title);
-                                        }
-                                    } catch(e) {
-                                        console.error("Extract error", e);
-                                    }
-                                })();
-                            """
-                            webViewInstance?.evaluateJavascript(jsExtract, null)
+                            .border(
+                                width = 1.dp,
+                                color = if (isTranslateBarVisible || isTranslated) Color(0xFF38BDF8) else DarkBorder,
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                            .clickable {
+                                isTranslateBarVisible = !isTranslateBarVisible
+                                prefs.showTranslateBar = isTranslateBarVisible
+                            }
+                            .padding(horizontal = 8.dp, vertical = 5.dp)
+                            .testTag("toggle_translate_bar_button"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Translate,
+                                contentDescription = "แปลภาษา Google",
+                                tint = if (isTranslateBarVisible || isTranslated) Color.White else Color(0xFFD1D5DB),
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = if (isTranslated) "แปลไทยแล้ว ✓" else "แปลภาษา",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isTranslateBarVisible || isTranslated) Color.White else Color(0xFFD1D5DB),
+                                fontSize = 11.sp
+                            )
                         }
-                        .padding(horizontal = 10.dp, vertical = 5.dp)
-                        .testTag("extract_and_read_button"),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.VolumeUp,
-                            contentDescription = "อ่านเสียงหน้านี้",
-                            tint = Color(0xFF0F0F0F),
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "อ่านเสียงหน้านี้",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF0F0F0F)
-                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(6.dp))
+
+                    // Action button: Toggle In-App Player Floating Bar
+                    val isOverlayActive = !isPlayerBarDismissed
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(
+                                if (isOverlayActive) {
+                                    Brush.horizontalGradient(listOf(AmberPrimary, AmberSecondary))
+                                } else {
+                                    Brush.horizontalGradient(listOf(Color(0xFF222222), Color(0xFF222222)))
+                                }
+                            )
+                            .border(
+                                width = 1.dp,
+                                color = if (isOverlayActive) AmberPrimary else DarkBorder,
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                            .clickable { onTogglePlayerBar() }
+                            .padding(horizontal = 8.dp, vertical = 5.dp)
+                            .testTag("toggle_player_overlay_button"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = if (isOverlayActive) Icons.Default.NotificationsActive else Icons.Default.NotificationsNone,
+                                contentDescription = if (isOverlayActive) "แถบควบคุมเสียง: แสดง" else "แถบควบคุมเสียง: ซ่อน",
+                                tint = if (isOverlayActive) Color(0xFF0F0F0F) else Color(0xFFD1D5DB),
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = if (isOverlayActive) "แถบเสียง: เปิด" else "แถบเสียง: ปิด",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isOverlayActive) Color(0xFF0F0F0F) else Color(0xFFD1D5DB),
+                                fontSize = 11.sp
+                            )
+                        }
                     }
                 }
             }
@@ -344,6 +409,34 @@ fun WebCompanionScreen(
                 )
             }
         }
+
+        // Chrome-style Translation Bar
+        ChromeTranslateBar(
+            isVisible = isTranslateBarVisible,
+            isTranslated = isTranslated,
+            isTranslating = isTranslating,
+            targetLang = targetLang,
+            isAutoTranslate = isAutoTranslate,
+            onTranslateTo = { lang ->
+                targetLang = lang
+                prefs.targetLanguage = lang
+                bridge.translatePage(lang)
+            },
+            onRestoreOriginal = {
+                bridge.restoreOriginal()
+            },
+            onToggleAutoTranslate = { enabled ->
+                isAutoTranslate = enabled
+                prefs.isAutoTranslate = enabled
+                if (enabled) {
+                    bridge.translatePage(targetLang)
+                }
+            },
+            onCloseBar = {
+                isTranslateBarVisible = false
+                prefs.showTranslateBar = false
+            }
+        )
 
         // Main In-App WebView
         Box(
@@ -391,6 +484,7 @@ fun WebCompanionScreen(
                             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                                 super.onPageStarted(view, url, favicon)
                                 isLoading = true
+                                isTranslated = false
                                 if (url != null) {
                                     inputUrl = url
                                     currentUrl = url
@@ -399,8 +493,10 @@ fun WebCompanionScreen(
                                 canGoBack = view?.canGoBack() == true
                                 canGoForward = view?.canGoForward() == true
 
-                                // Early injection
+                                // Early injection for Web Speech & Chrome Translate
                                 view?.evaluateJavascript(NovelTtsBridge.INJECTION_SCRIPT, null)
+                                view?.evaluateJavascript(NovelTtsBridge.TRANSLATE_INJECTION_SCRIPT, null)
+                                view?.evaluateJavascript("if (window.__android_tts_sync_ready) window.__android_tts_sync_ready();", null)
                             }
 
                             override fun onPageFinished(view: WebView?, url: String?) {
@@ -410,8 +506,17 @@ fun WebCompanionScreen(
                                 canGoBack = view?.canGoBack() == true
                                 canGoForward = view?.canGoForward() == true
 
-                                // Re-inject bridge and hooks
+                                // Re-inject bridge and translation hooks
                                 view?.evaluateJavascript(NovelTtsBridge.INJECTION_SCRIPT, null)
+                                view?.evaluateJavascript(NovelTtsBridge.TRANSLATE_INJECTION_SCRIPT, null)
+                                view?.evaluateJavascript("if (window.__android_tts_sync_ready) window.__android_tts_sync_ready();", null)
+
+                                // If auto-translate is enabled, trigger translation
+                                if (prefs.isAutoTranslate) {
+                                    view?.postDelayed({
+                                        bridge.translatePage(prefs.targetLanguage)
+                                    }, 400)
+                                }
                             }
 
                             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {

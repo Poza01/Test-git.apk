@@ -1,38 +1,49 @@
 package com.example.ui.components
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.ElectricBolt
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.RecordVoiceOver
-import androidx.compose.material.icons.outlined.Book
 import androidx.compose.material.icons.outlined.ElectricBolt
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.RecordVoiceOver
 import androidx.compose.material3.Icon
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.AmberPrimary
-import com.example.ui.theme.DarkSurface
+import com.example.ui.theme.AmberSecondary
 
 enum class AppScreen(val title: String) {
-    WEB_READER("เว็บแปลนิยาย"),
-    DIRECT_READER("อ่านข้อความ"),
-    VOICE_SETTINGS("เสียงเครื่อง"),
-    HYPEROS_GUIDE("กันดับ HyperOS")
+    WEB_READER("เว็บนิยาย"),
+    VOICE_SETTINGS("ตั้งค่าเสียง"),
+    BACKGROUND_SETTINGS("ตั้งค่าเบื้องหลัง")
 }
 
 @Composable
@@ -41,115 +52,95 @@ fun AppBottomNav(
     onScreenSelected: (AppScreen) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    NavigationBar(
+    Surface(
         modifier = modifier
+            .fillMaxWidth()
             .windowInsetsPadding(WindowInsets.navigationBars)
+            .padding(horizontal = 12.dp, vertical = 4.dp)
             .testTag("app_bottom_nav"),
-        containerColor = DarkSurface,
-        tonalElevation = 8.dp
+        shape = RoundedCornerShape(20.dp),
+        color = Color(0xFF141416).copy(alpha = 0.96f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF26262B))
     ) {
-        NavigationBarItem(
-            selected = currentScreen == AppScreen.WEB_READER,
-            onClick = { onScreenSelected(AppScreen.WEB_READER) },
-            icon = {
-                Icon(
-                    imageVector = if (currentScreen == AppScreen.WEB_READER) Icons.Filled.Language else Icons.Outlined.Language,
-                    contentDescription = "เว็บแปลนิยาย"
-                )
-            },
-            label = {
-                Text(
-                    text = "เว็บนิยาย",
-                    fontSize = 11.sp,
-                    fontWeight = if (currentScreen == AppScreen.WEB_READER) FontWeight.Bold else FontWeight.Normal
-                )
-            },
-            colors = NavigationBarItemDefaults.colors(
-                selectedIconColor = Color(0xFF0F0F0F),
-                selectedTextColor = AmberPrimary,
-                indicatorColor = AmberPrimary,
-                unselectedIconColor = Color(0xFF9CA3AF),
-                unselectedTextColor = Color(0xFF9CA3AF)
-            ),
-            modifier = Modifier.testTag("nav_tab_web")
-        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            SlimNavItem(
+                title = "เว็บนิยาย",
+                selectedIcon = Icons.Filled.Language,
+                unselectedIcon = Icons.Outlined.Language,
+                isSelected = currentScreen == AppScreen.WEB_READER,
+                onClick = { onScreenSelected(AppScreen.WEB_READER) },
+                testTag = "nav_tab_web"
+            )
 
-        NavigationBarItem(
-            selected = currentScreen == AppScreen.DIRECT_READER,
-            onClick = { onScreenSelected(AppScreen.DIRECT_READER) },
-            icon = {
-                Icon(
-                    imageVector = if (currentScreen == AppScreen.DIRECT_READER) Icons.Filled.Book else Icons.Outlined.Book,
-                    contentDescription = "อ่านข้อความ"
-                )
-            },
-            label = {
-                Text(
-                    text = "อ่านข้อความ",
-                    fontSize = 11.sp,
-                    fontWeight = if (currentScreen == AppScreen.DIRECT_READER) FontWeight.Bold else FontWeight.Normal
-                )
-            },
-            colors = NavigationBarItemDefaults.colors(
-                selectedIconColor = Color(0xFF0F0F0F),
-                selectedTextColor = AmberPrimary,
-                indicatorColor = AmberPrimary,
-                unselectedIconColor = Color(0xFF9CA3AF),
-                unselectedTextColor = Color(0xFF9CA3AF)
-            ),
-            modifier = Modifier.testTag("nav_tab_direct")
-        )
+            SlimNavItem(
+                title = "ตั้งค่าเสียง",
+                selectedIcon = Icons.Filled.RecordVoiceOver,
+                unselectedIcon = Icons.Outlined.RecordVoiceOver,
+                isSelected = currentScreen == AppScreen.VOICE_SETTINGS,
+                onClick = { onScreenSelected(AppScreen.VOICE_SETTINGS) },
+                testTag = "nav_tab_voice"
+            )
 
-        NavigationBarItem(
-            selected = currentScreen == AppScreen.VOICE_SETTINGS,
-            onClick = { onScreenSelected(AppScreen.VOICE_SETTINGS) },
-            icon = {
-                Icon(
-                    imageVector = if (currentScreen == AppScreen.VOICE_SETTINGS) Icons.Filled.RecordVoiceOver else Icons.Outlined.RecordVoiceOver,
-                    contentDescription = "ตั้งค่าเสียง"
-                )
-            },
-            label = {
-                Text(
-                    text = "เสียงเครื่อง",
-                    fontSize = 11.sp,
-                    fontWeight = if (currentScreen == AppScreen.VOICE_SETTINGS) FontWeight.Bold else FontWeight.Normal
-                )
-            },
-            colors = NavigationBarItemDefaults.colors(
-                selectedIconColor = Color(0xFF0F0F0F),
-                selectedTextColor = AmberPrimary,
-                indicatorColor = AmberPrimary,
-                unselectedIconColor = Color(0xFF9CA3AF),
-                unselectedTextColor = Color(0xFF9CA3AF)
-            ),
-            modifier = Modifier.testTag("nav_tab_voice")
-        )
-
-        NavigationBarItem(
-            selected = currentScreen == AppScreen.HYPEROS_GUIDE,
-            onClick = { onScreenSelected(AppScreen.HYPEROS_GUIDE) },
-            icon = {
-                Icon(
-                    imageVector = if (currentScreen == AppScreen.HYPEROS_GUIDE) Icons.Filled.ElectricBolt else Icons.Outlined.ElectricBolt,
-                    contentDescription = "HyperOS"
-                )
-            },
-            label = {
-                Text(
-                    text = "HyperOS 2",
-                    fontSize = 11.sp,
-                    fontWeight = if (currentScreen == AppScreen.HYPEROS_GUIDE) FontWeight.Bold else FontWeight.Normal
-                )
-            },
-            colors = NavigationBarItemDefaults.colors(
-                selectedIconColor = Color(0xFF0F0F0F),
-                selectedTextColor = AmberPrimary,
-                indicatorColor = AmberPrimary,
-                unselectedIconColor = Color(0xFF9CA3AF),
-                unselectedTextColor = Color(0xFF9CA3AF)
-            ),
-            modifier = Modifier.testTag("nav_tab_hyperos")
-        )
+            SlimNavItem(
+                title = "ตั้งค่าเบื้องหลัง",
+                selectedIcon = Icons.Filled.ElectricBolt,
+                unselectedIcon = Icons.Outlined.ElectricBolt,
+                isSelected = currentScreen == AppScreen.BACKGROUND_SETTINGS,
+                onClick = { onScreenSelected(AppScreen.BACKGROUND_SETTINGS) },
+                testTag = "nav_tab_background"
+            )
+        }
     }
 }
+
+@Composable
+private fun SlimNavItem(
+    title: String,
+    selectedIcon: ImageVector,
+    unselectedIcon: ImageVector,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    testTag: String
+) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(14.dp))
+            .then(
+                if (isSelected) {
+                    Modifier.background(Brush.horizontalGradient(listOf(AmberPrimary, AmberSecondary)))
+                } else {
+                    Modifier.background(Color.Transparent)
+                }
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .testTag(testTag),
+        contentAlignment = Alignment.Center
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = if (isSelected) selectedIcon else unselectedIcon,
+                contentDescription = title,
+                tint = if (isSelected) Color(0xFF0F0F0F) else Color(0xFF9CA3AF),
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(modifier = Modifier.width(5.dp))
+            Text(
+                text = title,
+                fontSize = 11.sp,
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                color = if (isSelected) Color(0xFF0F0F0F) else Color(0xFF9CA3AF)
+            )
+        }
+    }
+}
+

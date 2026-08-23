@@ -30,4 +30,20 @@ class NovelPreferences(context: Context) {
     var isHyperOsGuideDismissed: Boolean
         get() = prefs.getBoolean("key_hyperos_dismissed", false)
         set(value) = prefs.edit().putBoolean("key_hyperos_dismissed", value).apply()
+
+    var isAutoTranslate: Boolean
+        get() = prefs.getBoolean("key_auto_translate", false)
+        set(value) = prefs.edit().putBoolean("key_auto_translate", value).apply()
+
+    var targetLanguage: String
+        get() = prefs.getString("key_target_language", "th") ?: "th"
+        set(value) = prefs.edit().putString("key_target_language", value).apply()
+
+    var showTranslateBar: Boolean
+        get() = prefs.getBoolean("key_show_translate_bar", true)
+        set(value) = prefs.edit().putBoolean("key_show_translate_bar", value).apply()
+
+    var isPlayerBarDismissed: Boolean
+        get() = prefs.getBoolean("key_player_bar_dismissed", false)
+        set(value) = prefs.edit().putBoolean("key_player_bar_dismissed", value).apply()
 }

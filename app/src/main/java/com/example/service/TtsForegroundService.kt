@@ -41,7 +41,10 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
     private val _playbackState = MutableStateFlow(TtsPlaybackState())
     val playbackState: StateFlow<TtsPlaybackState> = _playbackState.asStateFlow()
 
+    private val prefs by lazy { com.example.data.NovelPreferences(applicationContext) }
+
     private var currentUtteranceId = 0L
+    private var pendingSpeechAction: (() -> Unit)? = null
 
     var onUtteranceEvent: ((event: String, utteranceId: String) -> Unit)? = null
 
@@ -53,9 +56,11 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         createNotificationChannel()
         acquireWakeLock()
         initTtsEngine()
+        startAsForegroundService()
     }
 
     private fun acquireWakeLock() {
@@ -103,17 +108,39 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
             val voices = extractDeviceVoices()
             val defaultEngine = tts?.defaultEngine ?: "Android TTS"
 
+            val savedRate = prefs.defaultRate
+            val savedPitch = prefs.defaultPitch
+            val savedVoice = prefs.selectedVoice
+
+            tts?.setSpeechRate(savedRate)
+            tts?.setPitch(savedPitch)
+
+            if (!savedVoice.isNullOrBlank()) {
+                val matchingVoice = tts?.voices?.find { it.name == savedVoice }
+                if (matchingVoice != null) {
+                    tts?.voice = matchingVoice
+                }
+            }
+
             _playbackState.update { current ->
                 current.copy(
                     isInitialized = true,
                     engineName = defaultEngine,
                     availableVoices = voices,
-                    selectedVoiceName = tts?.voice?.name
+                    selectedVoiceName = tts?.voice?.name ?: savedVoice,
+                    speechRate = savedRate,
+                    speechPitch = savedPitch
                 )
             }
 
             setupUtteranceListener()
-            Log.d(TAG, "TextToSpeech initialized with ${voices.size} voices")
+            updateForegroundNotification()
+            Log.d(TAG, "TextToSpeech initialized with ${voices.size} voices, rate=$savedRate, pitch=$savedPitch")
+
+            // Execute any pending speech requested before initialization was complete
+            val pending = pendingSpeechAction
+            pendingSpeechAction = null
+            pending?.invoke()
         } else {
             Log.e(TAG, "Failed to initialize TextToSpeech engine, status=$status")
         }
@@ -213,6 +240,12 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
         val cleanList = paragraphs.filter { it.isNotBlank() }
         if (cleanList.isEmpty()) return
 
+        if (!_playbackState.value.isInitialized || tts == null) {
+            Log.d(TAG, "TTS not ready yet, queuing playPlaylist")
+            pendingSpeechAction = { playPlaylist(paragraphs, title, startIndex) }
+            return
+        }
+
         val safeStart = startIndex.coerceIn(0, cleanList.size - 1)
         _playbackState.update {
             it.copy(
@@ -239,6 +272,12 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
         val cleanText = text.trim()
         if (cleanText.isBlank()) return
 
+        if (!_playbackState.value.isInitialized || tts == null) {
+            Log.d(TAG, "TTS not ready yet, queuing speakFromWeb")
+            pendingSpeechAction = { speakFromWeb(text, title, webUtteranceId) }
+            return
+        }
+
         _playbackState.update {
             it.copy(
                 chapterTitle = title.ifBlank { "อ่านนิยายเว็บ" },
@@ -249,6 +288,12 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
         }
 
         startAsForegroundService()
+
+        val selectedVoice = _playbackState.value.selectedVoiceName
+        if (!selectedVoice.isNullOrBlank()) {
+            val target = tts?.voices?.find { it.name == selectedVoice }
+            if (target != null) tts?.voice = target
+        }
         tts?.setSpeechRate(_playbackState.value.speechRate)
         tts?.setPitch(_playbackState.value.speechPitch)
 
@@ -277,6 +322,11 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
 
         updateForegroundNotification()
 
+        val selectedVoice = _playbackState.value.selectedVoiceName
+        if (!selectedVoice.isNullOrBlank()) {
+            val target = tts?.voices?.find { it.name == selectedVoice }
+            if (target != null) tts?.voice = target
+        }
         tts?.setSpeechRate(_playbackState.value.speechRate)
         tts?.setPitch(_playbackState.value.speechPitch)
 
@@ -314,7 +364,7 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
                 paragraphs = emptyList()
             )
         }
-        stopForegroundIfIdle()
+        updateForegroundNotification()
     }
 
     fun skipNext() {
@@ -334,12 +384,14 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
     fun setSpeechRate(rate: Float) {
         val cleanRate = rate.coerceIn(0.5f, 2.5f)
         tts?.setSpeechRate(cleanRate)
+        prefs.defaultRate = cleanRate
         _playbackState.update { it.copy(speechRate = cleanRate) }
     }
 
     fun setSpeechPitch(pitch: Float) {
         val cleanPitch = pitch.coerceIn(0.5f, 1.8f)
         tts?.setPitch(cleanPitch)
+        prefs.defaultPitch = cleanPitch
         _playbackState.update { it.copy(speechPitch = cleanPitch) }
     }
 
@@ -348,8 +400,9 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
             val targetVoice = tts?.voices?.find { it.name == voiceName }
             if (targetVoice != null) {
                 tts?.voice = targetVoice
+                prefs.selectedVoice = voiceName
                 _playbackState.update { it.copy(selectedVoiceName = voiceName) }
-                Log.d(TAG, "Voice changed to: $voiceName")
+                Log.d(TAG, "Voice changed and saved: $voiceName")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error changing voice", e)
@@ -466,6 +519,9 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
     }
 
     override fun onDestroy() {
+        if (instance == this) {
+            instance = null
+        }
         tts?.stop()
         tts?.shutdown()
         tts = null
@@ -475,6 +531,10 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
     }
 
     companion object {
+        @Volatile
+        var instance: TtsForegroundService? = null
+            private set
+
         const val TAG = "TtsForegroundService"
         const val CHANNEL_ID = "novel_tts_playback_channel"
         const val NOTIFICATION_ID = 10086

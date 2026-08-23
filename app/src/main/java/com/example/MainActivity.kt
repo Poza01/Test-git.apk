@@ -34,7 +34,6 @@ import com.example.service.TtsPlaybackState
 import com.example.ui.components.AppBottomNav
 import com.example.ui.components.AppScreen
 import com.example.ui.components.FloatingPlayerBar
-import com.example.ui.screens.DirectReaderScreen
 import com.example.ui.screens.HyperOsGuideScreen
 import com.example.ui.screens.VoiceSettingsScreen
 import com.example.ui.screens.WebCompanionScreen
@@ -68,6 +67,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         ensureWebViewCacheDirExists()
         checkNotificationPermission()
+        ttsService = TtsForegroundService.instance
         bindTtsService()
 
         setContent {
@@ -120,13 +120,9 @@ fun MainAppContainer(
 ) {
     var currentScreen by remember { mutableStateOf(AppScreen.WEB_READER) }
     val playbackState = service?.playbackState?.collectAsState()?.value ?: TtsPlaybackState()
-    var isPlayerBarDismissed by remember { mutableStateOf(false) }
-
-    androidx.compose.runtime.LaunchedEffect(playbackState.isPlaying) {
-        if (playbackState.isPlaying) {
-            isPlayerBarDismissed = false
-        }
-    }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val prefs = remember(context) { com.example.data.NovelPreferences(context) }
+    var isPlayerBarDismissed by remember { mutableStateOf(prefs.isPlayerBarDismissed) }
 
     val cycleRate: () -> Unit = {
         val rates = listOf(1.0f, 1.25f, 1.5f, 1.75f, 2.0f, 0.75f)
@@ -156,13 +152,13 @@ fun MainAppContainer(
                 AppScreen.WEB_READER -> {
                     WebCompanionScreen(
                         service = service,
-                        onNavigateToHyperOsGuide = { currentScreen = AppScreen.HYPEROS_GUIDE }
-                    )
-                }
-
-                AppScreen.DIRECT_READER -> {
-                    DirectReaderScreen(
-                        service = service
+                        isPlayerBarDismissed = isPlayerBarDismissed,
+                        onTogglePlayerBar = {
+                            val newValue = !isPlayerBarDismissed
+                            isPlayerBarDismissed = newValue
+                            prefs.isPlayerBarDismissed = newValue
+                        },
+                        onNavigateToBackgroundSettings = { currentScreen = AppScreen.BACKGROUND_SETTINGS }
                     )
                 }
 
@@ -172,7 +168,7 @@ fun MainAppContainer(
                     )
                 }
 
-                AppScreen.HYPEROS_GUIDE -> {
+                AppScreen.BACKGROUND_SETTINGS -> {
                     HyperOsGuideScreen(
                         service = service
                     )
@@ -190,9 +186,12 @@ fun MainAppContainer(
                 onSkipPrev = { service?.skipPrevious() },
                 onStop = {
                     service?.stop()
-                    isPlayerBarDismissed = true
                 },
                 onCycleRate = cycleRate,
+                onDismissOverlay = {
+                    isPlayerBarDismissed = true
+                    prefs.isPlayerBarDismissed = true
+                },
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
             )

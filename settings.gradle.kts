@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "NovelAI TTS"
+rootProject.name = "TTS เบื้องหลัง"
 
 include(":app")

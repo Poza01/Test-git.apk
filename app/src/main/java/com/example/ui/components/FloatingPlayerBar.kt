@@ -57,6 +57,7 @@ fun FloatingPlayerBar(
     onSkipPrev: () -> Unit,
     onStop: () -> Unit,
     onCycleRate: () -> Unit,
+    onDismissOverlay: () -> Unit = onStop,
     modifier: Modifier = Modifier,
     isDismissed: Boolean = false
 ) {
@@ -166,14 +167,14 @@ fun FloatingPlayerBar(
                     Spacer(modifier = Modifier.width(6.dp))
 
                     IconButton(
-                        onClick = onStop,
+                        onClick = onDismissOverlay,
                         modifier = Modifier
                             .size(28.dp)
                             .testTag("player_close_button")
                     ) {
                         Icon(
                             imageVector = Icons.Default.Close,
-                            contentDescription = "ปิดแถบเสียง",
+                            contentDescription = "ซ่อนหน้าต่างแจ้งเตือน/แถบเสียง",
                             tint = Color(0xFF9CA3AF),
                             modifier = Modifier.size(18.dp)
                         )

@@ -3,6 +3,7 @@ package com.example.ui.screens
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -21,6 +22,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BatteryAlert
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ElectricBolt
@@ -29,7 +31,6 @@ import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PowerSettingsNew
-import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -39,14 +40,18 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.R
 import com.example.service.TtsForegroundService
 import com.example.ui.theme.AmberPrimary
 import com.example.ui.theme.AmberSecondary
@@ -79,42 +84,122 @@ fun HyperOsGuideScreen(
             .background(Color(0xFF0F0F0F))
             .padding(16.dp)
             .testTag("hyperos_guide_screen"),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Hero Banner
+        // App Profile & Hero Cover Card
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("profile_hero_card"),
+                shape = RoundedCornerShape(22.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF181512)),
+                border = androidx.compose.foundation.BorderStroke(1.dp, AmberPrimary.copy(alpha = 0.4f))
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    // Profile Image with glowing circular border
+                    Box(
+                        modifier = Modifier
+                            .size(108.dp)
+                            .clip(CircleShape)
+                            .border(
+                                width = 3.dp,
+                                brush = Brush.sweepGradient(
+                                    listOf(AmberPrimary, AmberSecondary, Color(0xFFFBBF24), AmberPrimary)
+                                ),
+                                shape = CircleShape
+                            )
+                            .background(Color(0xFF0D0D0D)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Image(
+                            painter = painterResource(id = R.drawable.img_app_cover_1787456498575),
+                            contentDescription = "TTS เบื้องหลัง Profile Cover",
+                            modifier = Modifier
+                                .size(102.dp)
+                                .clip(CircleShape),
+                            contentScale = ContentScale.Crop
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Text(
+                        text = "TTS เบื้องหลัง",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color.White
+                    )
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    // Status pill badge
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xFF064E3B).copy(alpha = 0.6f))
+                            .border(1.dp, EmeraldSuccess.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(7.dp)
+                                    .clip(CircleShape)
+                                    .background(EmeraldSuccess)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "ระบบอ่านนิยายเบื้องหลังแบบไม่ดับ",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color(0xFFA7F3D0),
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Header
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(22.dp),
+                shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1605)),
                 border = androidx.compose.foundation.BorderStroke(1.dp, AmberPrimary.copy(alpha = 0.5f))
             ) {
-                Column(modifier = Modifier.padding(18.dp)) {
+                Column(modifier = Modifier.padding(16.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
                             modifier = Modifier
-                                .size(40.dp)
+                                .size(36.dp)
                                 .clip(CircleShape)
                                 .background(AmberPrimary.copy(alpha = 0.2f)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Default.ElectricBolt,
-                                contentDescription = "HyperOS",
+                                contentDescription = "ตั้งค่าเบื้องหลัง",
                                 tint = AmberPrimary,
-                                modifier = Modifier.size(24.dp)
+                                modifier = Modifier.size(20.dp)
                             )
                         }
-                        Spacer(modifier = Modifier.width(12.dp))
+                        Spacer(modifier = Modifier.width(10.dp))
                         Column {
                             Text(
-                                text = "คู่มือตั้งค่า Xiaomi HyperOS 2",
+                                text = "ตั้งค่าให้เล่นเสียงต่อเนื่องไม่ดับ",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
                             )
                             Text(
-                                text = "ป้องกันระบบสั่งปิดเสียงเมื่อสลับไปเล่น Facebook / ดับจอ",
+                                text = "สำหรับ Xiaomi / HyperOS / MIUI / Samsung / OPPO",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = AmberPrimary,
                                 fontSize = 11.sp
@@ -123,16 +208,8 @@ fun HyperOsGuideScreen(
                     }
 
                     Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = "HyperOS 2 มีระบบจัดการแบตเตอรี่ที่ตัดแอปเบื้องหลังเร็วมาก เพียงตั้งค่าตาม 3 ขั้นตอนนี้ครั้งเดียว เสียงอ่านภาษาไทยจะเล่นต่อเนื่องไม่ดับ 100%",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color(0xFFD1D5DB),
-                        lineHeight = 18.sp
-                    )
 
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    // Big Open App Info Button
+                    // Shortcut to App Settings
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -143,7 +220,7 @@ fun HyperOsGuideScreen(
                                 )
                             )
                             .clickable { openAppSettings() }
-                            .padding(vertical = 12.dp)
+                            .padding(vertical = 11.dp)
                             .testTag("open_app_settings_button"),
                         contentAlignment = Alignment.Center
                     ) {
@@ -156,7 +233,7 @@ fun HyperOsGuideScreen(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "เปิดหน้าการตั้งค่าแอปทันที",
+                                text = "แตะเปิดหน้าตั้งค่าแอปทันที",
                                 style = MaterialTheme.typography.labelLarge,
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0xFF0F0F0F)
@@ -167,94 +244,90 @@ fun HyperOsGuideScreen(
             }
         }
 
-        // Step 1: Battery Saver -> No Restrictions
+        // Step 1: Battery Saver
         item {
-            HyperOsStepCard(
-                stepNumber = "1",
-                title = "การประหยัดแบตเตอรี่ (Battery Saver)",
-                instruction = "ในหน้าข้อมูลแอป ให้แตะ 'การประหยัดแบตเตอรี่' แล้วเปลี่ยนเป็น 'ไม่จำกัด (No restrictions)'",
+            SimpleStepCard(
+                step = "1",
+                title = "ประหยัดแบตเตอรี่ (Battery)",
+                detail = "เลือกเป็น \"ไม่จำกัด (No restrictions)\" เพื่อไม่ให้ระบบตัดเสียง",
                 icon = Icons.Default.BatteryAlert,
-                accentColor = EmeraldSuccess
+                color = EmeraldSuccess
             )
         }
 
         // Step 2: Autostart
         item {
-            HyperOsStepCard(
-                stepNumber = "2",
+            SimpleStepCard(
+                step = "2",
                 title = "เริ่มทำงานอัตโนมัติ (Autostart)",
-                instruction = "เปิดสวิตช์ 'เริ่มทำงานอัตโนมัติ' และ 'การเริ่มทำงานอัตโนมัติเบื้องหลัง' เพื่อให้ Foreground Service ทำงานไม่สะดุด",
+                detail = "เปิดสวิตช์อนุญาตให้แอปทำงานเบื้องหลัง",
                 icon = Icons.Default.PowerSettingsNew,
-                accentColor = AmberPrimary
+                color = AmberPrimary
             )
         }
 
-        // Step 3: Lock App in Recent Apps
+        // Step 3: Lock App
         item {
-            HyperOsStepCard(
-                stepNumber = "3",
-                title = "ล็อกแอปในหน้า Recent Apps (Lock App)",
-                instruction = "รูดเปิดหน้าสลับแอป (Recent Apps) แตะค้างที่ตัวแอป NovelAI TTS แล้วกดรูป 'แม่กุญแจ 🔒' เพื่อไม่ให้ระบบล้างแอปทิ้ง",
+            SimpleStepCard(
+                step = "3",
+                title = "ล็อกแอปในหน้าสลับแอป (Lock App)",
+                detail = "เปิดหน้าสลับแอป แตะค้างที่แอปนี้แล้วกดรูป แม่กุญแจ 🔒",
                 icon = Icons.Default.Lock,
-                accentColor = Color(0xFF06B6D4)
+                color = Color(0xFF06B6D4)
             )
         }
 
-        // Step 4: Notification Permission
+        // Step 4: Notification
         item {
-            HyperOsStepCard(
-                stepNumber = "4",
-                title = "การแจ้งเตือน (Notifications)",
-                instruction = "อนุญาตการแจ้งเตือน เพื่อให้มีแถบเล่นเสียง (Play / Pause / Next) บนหน้าจอล็อกและแถบด้านบน",
+            SimpleStepCard(
+                step = "4",
+                title = "เปิดการแจ้งเตือน (Notifications)",
+                detail = "เปิดอนุญาตการแจ้งเตือน เพื่อแสดงแถบควบคุมเสียงด้านบน",
                 icon = Icons.Default.NotificationsActive,
-                accentColor = Color(0xFFA855F7)
+                color = Color(0xFFA855F7)
             )
         }
 
-        // Test Background Speech
+        // Test button
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
+                shape = RoundedCornerShape(18.dp),
                 colors = CardDefaults.cardColors(containerColor = DarkSurface),
                 border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder)
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
+                Column(modifier = Modifier.padding(14.dp)) {
                     Text(
-                        text = "ทดสอบการอ่านเสียงและสลับหน้าจอ",
+                        text = "ทดสอบการเล่นเสียงเบื้องหลัง",
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
                         color = Color.White
                     )
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "กดปุ่มด้านล่างเพื่อเริ่มอ่านเสียงยาว 5 ย่อหน้า จากนั้นลองสลับไปเปิด Facebook หรือกดปุ่มดับหน้าจอล็อกเครื่องเพื่อทดสอบว่าเสียงยังเล่นต่อเนื่อง",
+                        text = "กดปุ่มด้านล่างแล้วลองพับแอปหรือล็อกหน้าจอ",
                         style = MaterialTheme.typography.bodySmall,
                         color = Color(0xFF9CA3AF),
-                        fontSize = 12.sp,
-                        lineHeight = 18.sp
+                        fontSize = 11.sp
                     )
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
                     val testParagraphs = listOf(
-                        "ย่อหน้าที่หนึ่ง: ระบบ Foreground Service ของ Android เริ่มทำงานอย่างสมบูรณ์แบบ",
-                        "ย่อหน้าที่สอง: ตอนนี้คุณสามารถสลับไปเล่น Facebook ตอบแชทไลน์ หรือเล่นเกมอื่นได้เลย",
-                        "ย่อหน้าที่สาม: แม้ว่าคุณจะกดปุ่มดับหน้าจอล็อกเครื่องใส่กระเป๋า เสียงอ่านภาษาไทยก็จะยังคงอ่านต่ออย่างราบรื่น",
-                        "ย่อหน้าที่สี่: คุณสามารถใช้ปุ่มบนหูฟังบลูทูธ หรือแถบแจ้งเตือนด้านบนในการกดหยุดหรือข้ามย่อหน้าได้",
-                        "ย่อหน้าที่ห้า: การทดสอบระบบเสียงเบื้องหลังบน HyperOS 2 เสร็จสมบูรณ์ ขอให้เพลิดเพลินกับการฟังนิยายครับ"
+                        "ระบบเสียงเบื้องหลังกำลังทำงาน คุณสามารถสลับไปเล่นแอปอื่นหรือล็อกหน้าจอได้เลยครับ",
+                        "เสียงอ่านภาษาไทยจะยังคงเล่นต่อเนื่องโดยไม่โดนระบบตัดการทำงานครับ"
                     )
 
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
+                            .clip(RoundedCornerShape(12.dp))
                             .background(Color(0xFF222222))
-                            .border(1.dp, AmberPrimary, RoundedCornerShape(14.dp))
+                            .border(1.dp, AmberPrimary, RoundedCornerShape(12.dp))
                             .clickable {
-                                service?.playPlaylist(testParagraphs, "ทดสอบเสียงเบื้องหลัง HyperOS 2", 0)
+                                service?.playPlaylist(testParagraphs, "ทดสอบเสียงเบื้องหลัง", 0)
                             }
-                            .padding(vertical = 12.dp)
+                            .padding(vertical = 10.dp)
                             .testTag("test_background_speech_button"),
                         contentAlignment = Alignment.Center
                     ) {
@@ -267,8 +340,8 @@ fun HyperOsGuideScreen(
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "เริ่มทดสอบอ่านเสียงเบื้องหลัง (5 ย่อหน้า)",
-                                style = MaterialTheme.typography.labelLarge,
+                                text = "เริ่มทดสอบเล่นเสียงเบื้องหลัง",
+                                style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = AmberPrimary
                             )
@@ -279,55 +352,55 @@ fun HyperOsGuideScreen(
         }
 
         item {
-            Spacer(modifier = Modifier.height(60.dp))
+            Spacer(modifier = Modifier.height(50.dp))
         }
     }
 }
 
 @Composable
-private fun HyperOsStepCard(
-    stepNumber: String,
+private fun SimpleStepCard(
+    step: String,
     title: String,
-    instruction: String,
+    detail: String,
     icon: ImageVector,
-    accentColor: Color
+    color: Color
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = DarkSurface),
         border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder)
     ) {
         Row(
-            modifier = Modifier.padding(14.dp),
-            verticalAlignment = Alignment.Top
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
                 modifier = Modifier
-                    .size(34.dp)
+                    .size(30.dp)
                     .clip(CircleShape)
-                    .background(accentColor.copy(alpha = 0.2f)),
+                    .background(color.copy(alpha = 0.2f)),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = stepNumber,
+                    text = step,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp,
-                    color = accentColor
+                    fontSize = 13.sp,
+                    color = color
                 )
             }
 
-            Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(10.dp))
 
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
                         imageVector = icon,
                         contentDescription = title,
-                        tint = accentColor,
-                        modifier = Modifier.size(16.dp)
+                        tint = color,
+                        modifier = Modifier.size(15.dp)
                     )
-                    Spacer(modifier = Modifier.width(6.dp))
+                    Spacer(modifier = Modifier.width(5.dp))
                     Text(
                         text = title,
                         style = MaterialTheme.typography.bodyMedium,
@@ -336,13 +409,12 @@ private fun HyperOsStepCard(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = instruction,
+                    text = detail,
                     style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFF9CA3AF),
-                    fontSize = 12.sp,
-                    lineHeight = 18.sp
+                    color = Color(0xFFD1D5DB),
+                    fontSize = 12.sp
                 )
             }
         }
