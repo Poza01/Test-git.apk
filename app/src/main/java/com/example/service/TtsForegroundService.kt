@@ -1,0 +1,444 @@
+package com.example.service
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.content.Context
+import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.os.Binder
+import android.os.Build
+import android.os.IBinder
+import android.os.PowerManager
+import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
+import android.speech.tts.Voice
+import android.util.Log
+import androidx.core.app.NotificationCompat
+import com.example.MainActivity
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import java.util.Locale
+
+class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
+
+    private val binder = LocalBinder()
+    private val serviceJob = SupervisorJob()
+    private val serviceScope = CoroutineScope(Dispatchers.Main + serviceJob)
+
+    private var tts: TextToSpeech? = null
+    private var wakeLock: PowerManager.WakeLock? = null
+    private val notificationManager by lazy { getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager }
+
+    private val _playbackState = MutableStateFlow(TtsPlaybackState())
+    val playbackState: StateFlow<TtsPlaybackState> = _playbackState.asStateFlow()
+
+    private var currentUtteranceId = 0L
+
+    inner class LocalBinder : Binder() {
+        fun getService(): TtsForegroundService = this@TtsForegroundService
+    }
+
+    override fun onBind(intent: Intent?): IBinder = binder
+
+    override fun onCreate() {
+        super.onCreate()
+        createNotificationChannel()
+        acquireWakeLock()
+        initTtsEngine()
+    }
+
+    private fun acquireWakeLock() {
+        try {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            wakeLock = powerManager.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "NovelAI::TtsForegroundWakeLock"
+            ).apply {
+                setReferenceCounted(false)
+                acquire(10 * 60 * 60 * 1000L) // 10 hours safety window
+            }
+            Log.d(TAG, "WakeLock acquired for background reading")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error acquiring WakeLock", e)
+        }
+    }
+
+    private fun releaseWakeLock() {
+        try {
+            if (wakeLock?.isHeld == true) {
+                wakeLock?.release()
+                Log.d(TAG, "WakeLock released")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error releasing WakeLock", e)
+        }
+    }
+
+    private fun initTtsEngine() {
+        tts = TextToSpeech(applicationContext, this)
+    }
+
+    override fun onInit(status: Int) {
+        if (status == TextToSpeech.SUCCESS) {
+            val thaiLocale = Locale("th", "TH")
+            val langResult = tts?.setLanguage(thaiLocale)
+
+            if (langResult == TextToSpeech.LANG_MISSING_DATA || langResult == TextToSpeech.LANG_NOT_SUPPORTED) {
+                Log.w(TAG, "Thai locale missing data or not supported, trying default")
+                tts?.setLanguage(Locale.getDefault())
+            }
+
+            // Extract all device voices
+            val voices = extractDeviceVoices()
+            val defaultEngine = tts?.defaultEngine ?: "Android TTS"
+
+            _playbackState.update { current ->
+                current.copy(
+                    isInitialized = true,
+                    engineName = defaultEngine,
+                    availableVoices = voices,
+                    selectedVoiceName = tts?.voice?.name
+                )
+            }
+
+            setupUtteranceListener()
+            Log.d(TAG, "TextToSpeech initialized with ${voices.size} voices")
+        } else {
+            Log.e(TAG, "Failed to initialize TextToSpeech engine, status=$status")
+        }
+    }
+
+    private fun extractDeviceVoices(): List<VoiceInfo> {
+        val voiceList = mutableListOf<VoiceInfo>()
+        try {
+            val systemVoices = tts?.voices ?: emptySet()
+            for (v in systemVoices) {
+                val isThai = v.locale.language.equals("th", ignoreCase = true)
+                val voiceInfo = VoiceInfo(
+                    name = v.name,
+                    locale = v.locale.displayName,
+                    isNetworkConnectionRequired = v.isNetworkConnectionRequired,
+                    quality = if (isThai) "Thai Voice" else "Voice (${v.locale.language})"
+                )
+                if (isThai) {
+                    voiceList.add(0, voiceInfo) // Put Thai voices first
+                } else {
+                    voiceList.add(voiceInfo)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error listing voices", e)
+        }
+        return voiceList
+    }
+
+    private fun setupUtteranceListener() {
+        tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+            override fun onStart(utteranceId: String?) {
+                serviceScope.launch {
+                    _playbackState.update { it.copy(isPlaying = true, isPaused = false) }
+                    updateForegroundNotification()
+                }
+            }
+
+            override fun onDone(utteranceId: String?) {
+                serviceScope.launch {
+                    handleParagraphCompleted()
+                }
+            }
+
+            override fun onError(utteranceId: String?) {
+                Log.e(TAG, "Utterance error: $utteranceId")
+                serviceScope.launch {
+                    handleParagraphCompleted()
+                }
+            }
+        })
+    }
+
+    private fun handleParagraphCompleted() {
+        val state = _playbackState.value
+        if (!state.isPlaying || state.isPaused) return
+
+        val nextIndex = state.activeParagraphIndex + 1
+        if (nextIndex < state.paragraphs.size) {
+            speakParagraphInternal(nextIndex)
+        } else {
+            // End of playlist
+            _playbackState.update {
+                it.copy(
+                    isPlaying = false,
+                    isPaused = false,
+                    activeParagraphIndex = -1,
+                    currentText = ""
+                )
+            }
+            updateForegroundNotification()
+            stopForegroundIfIdle()
+        }
+    }
+
+    fun playPlaylist(paragraphs: List<String>, title: String, startIndex: Int = 0) {
+        val cleanList = paragraphs.filter { it.isNotBlank() }
+        if (cleanList.isEmpty()) return
+
+        val safeStart = startIndex.coerceIn(0, cleanList.size - 1)
+        _playbackState.update {
+            it.copy(
+                paragraphs = cleanList,
+                chapterTitle = title.ifBlank { "กำลังอ่านนิยาย" },
+                totalParagraphs = cleanList.size,
+                activeParagraphIndex = safeStart,
+                isPlaying = true,
+                isPaused = false
+            )
+        }
+
+        startAsForegroundService()
+        speakParagraphInternal(safeStart)
+    }
+
+    fun playSingleText(text: String, title: String = "อ่านข้อความ") {
+        if (text.isBlank()) return
+        val paragraphs = text.split("\n\n", "\n").filter { it.isNotBlank() }
+        playPlaylist(paragraphs, title, 0)
+    }
+
+    private fun speakParagraphInternal(index: Int) {
+        val state = _playbackState.value
+        if (index < 0 || index >= state.paragraphs.size) return
+
+        val textToSpeak = state.paragraphs[index].trim()
+        if (textToSpeak.isBlank()) {
+            handleParagraphCompleted()
+            return
+        }
+
+        _playbackState.update {
+            it.copy(
+                activeParagraphIndex = index,
+                currentText = textToSpeak,
+                isPlaying = true,
+                isPaused = false
+            )
+        }
+
+        updateForegroundNotification()
+
+        tts?.setSpeechRate(_playbackState.value.speechRate)
+        tts?.setPitch(_playbackState.value.speechPitch)
+
+        currentUtteranceId++
+        val utteranceId = "novel_tts_${currentUtteranceId}_$index"
+
+        tts?.speak(textToSpeak, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+    }
+
+    fun pause() {
+        tts?.stop()
+        _playbackState.update { it.copy(isPlaying = false, isPaused = true) }
+        updateForegroundNotification()
+    }
+
+    fun resume() {
+        val state = _playbackState.value
+        if (state.activeParagraphIndex >= 0 && state.activeParagraphIndex < state.paragraphs.size) {
+            startAsForegroundService()
+            speakParagraphInternal(state.activeParagraphIndex)
+        } else if (state.paragraphs.isNotEmpty()) {
+            startAsForegroundService()
+            speakParagraphInternal(0)
+        }
+    }
+
+    fun stop() {
+        tts?.stop()
+        _playbackState.update {
+            it.copy(
+                isPlaying = false,
+                isPaused = false,
+                activeParagraphIndex = -1,
+                currentText = ""
+            )
+        }
+        stopForegroundIfIdle()
+    }
+
+    fun skipNext() {
+        val state = _playbackState.value
+        if (state.paragraphs.isEmpty()) return
+        val nextIndex = (state.activeParagraphIndex + 1).coerceAtMost(state.paragraphs.size - 1)
+        speakParagraphInternal(nextIndex)
+    }
+
+    fun skipPrevious() {
+        val state = _playbackState.value
+        if (state.paragraphs.isEmpty()) return
+        val prevIndex = (state.activeParagraphIndex - 1).coerceAtLeast(0)
+        speakParagraphInternal(prevIndex)
+    }
+
+    fun setSpeechRate(rate: Float) {
+        val cleanRate = rate.coerceIn(0.5f, 2.5f)
+        tts?.setSpeechRate(cleanRate)
+        _playbackState.update { it.copy(speechRate = cleanRate) }
+    }
+
+    fun setSpeechPitch(pitch: Float) {
+        val cleanPitch = pitch.coerceIn(0.5f, 1.8f)
+        tts?.setPitch(cleanPitch)
+        _playbackState.update { it.copy(speechPitch = cleanPitch) }
+    }
+
+    fun setVoice(voiceName: String) {
+        try {
+            val targetVoice = tts?.voices?.find { it.name == voiceName }
+            if (targetVoice != null) {
+                tts?.voice = targetVoice
+                _playbackState.update { it.copy(selectedVoiceName = voiceName) }
+                Log.d(TAG, "Voice changed to: $voiceName")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error changing voice", e)
+        }
+    }
+
+    private fun startAsForegroundService() {
+        val notification = buildNotification()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+    }
+
+    private fun updateForegroundNotification() {
+        val notification = buildNotification()
+        notificationManager.notify(NOTIFICATION_ID, notification)
+    }
+
+    private fun stopForegroundIfIdle() {
+        stopForeground(STOP_FOREGROUND_REMOVE)
+    }
+
+    private fun buildNotification(): Notification {
+        val state = _playbackState.value
+        val title = state.chapterTitle.ifBlank { "NovelAI TTS Reader" }
+        val paraInfo = if (state.totalParagraphs > 0 && state.activeParagraphIndex >= 0) {
+            "ย่อหน้าที่ ${state.activeParagraphIndex + 1}/${state.totalParagraphs}"
+        } else {
+            "พร้อมอ่านออกเสียงเบื้องหลัง"
+        }
+
+        val contentIntent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val pendingContentIntent = PendingIntent.getActivity(
+            this,
+            0,
+            contentIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        // Previous intent
+        val prevIntent = Intent(this, TtsForegroundService::class.java).apply { action = ACTION_PREV }
+        val pendingPrev = PendingIntent.getService(this, 1, prevIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+
+        // Play/Pause toggle intent
+        val playPauseIntent = Intent(this, TtsForegroundService::class.java).apply {
+            action = if (state.isPlaying) ACTION_PAUSE else ACTION_PLAY
+        }
+        val pendingPlayPause = PendingIntent.getService(this, 2, playPauseIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+
+        // Next intent
+        val nextIntent = Intent(this, TtsForegroundService::class.java).apply { action = ACTION_NEXT }
+        val pendingNext = PendingIntent.getService(this, 3, nextIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+
+        // Stop intent
+        val stopIntent = Intent(this, TtsForegroundService::class.java).apply { action = ACTION_STOP }
+        val pendingStop = PendingIntent.getService(this, 4, stopIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+
+        val playPauseIcon = if (state.isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
+        val playPauseText = if (state.isPlaying) "พัก" else "เล่น"
+
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle(title)
+            .setContentText(paraInfo)
+            .setSubText(if (state.isPlaying) "กำลังอ่านเสียงไทย" else "หยุดชั่วคราว")
+            .setSmallIcon(android.R.drawable.ic_lock_silent_mode_off)
+            .setContentIntent(pendingContentIntent)
+            .setOngoing(state.isPlaying || state.isPaused)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .addAction(android.R.drawable.ic_media_previous, "ย้อนกลับ", pendingPrev)
+            .addAction(playPauseIcon, playPauseText, pendingPlayPause)
+            .addAction(android.R.drawable.ic_media_next, "ถัดไป", pendingNext)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "ปิด", pendingStop)
+            .setStyle(
+                NotificationCompat.BigTextStyle()
+                    .bigText(if (state.currentText.isNotBlank()) "${state.currentText}\n($paraInfo)" else paraInfo)
+            )
+            .build()
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                "เสียงอ่านนิยายเบื้องหลัง (Novel TTS)",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "การแจ้งเตือนควบคุมเสียงอ่านนิยายภาษาไทยไม่ดับเบื้องหลัง"
+                setShowBadge(false)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            }
+            notificationManager.createNotificationChannel(channel)
+        }
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            ACTION_PLAY -> resume()
+            ACTION_PAUSE -> pause()
+            ACTION_PREV -> skipPrevious()
+            ACTION_NEXT -> skipNext()
+            ACTION_STOP -> stop()
+        }
+        return START_STICKY
+    }
+
+    override fun onDestroy() {
+        tts?.stop()
+        tts?.shutdown()
+        tts = null
+        releaseWakeLock()
+        serviceJob.cancel()
+        super.onDestroy()
+    }
+
+    companion object {
+        const val TAG = "TtsForegroundService"
+        const val CHANNEL_ID = "novel_tts_playback_channel"
+        const val NOTIFICATION_ID = 10086
+
+        const val ACTION_PLAY = "com.example.noveltts.ACTION_PLAY"
+        const val ACTION_PAUSE = "com.example.noveltts.ACTION_PAUSE"
+        const val ACTION_PREV = "com.example.noveltts.ACTION_PREV"
+        const val ACTION_NEXT = "com.example.noveltts.ACTION_NEXT"
+        const val ACTION_STOP = "com.example.noveltts.ACTION_STOP"
+    }
+}

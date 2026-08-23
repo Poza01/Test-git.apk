@@ -1,0 +1,7 @@
+{
+  "name": "NovelAI TTS",
+  "description": "เครื่องมือเปิดเว็บแปลนิยายและอ่านออกเสียงภาษาไทยเบื้องหลังไม่ดับ รองรับ HyperOS 2",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
