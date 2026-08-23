@@ -47,16 +47,27 @@ class NovelTtsBridge(
         mainHandler.post {
             getWebView()?.evaluateJavascript("""
                 (function() {
+                    // Try direct next button or novel readers custom handlers
+                    if (typeof window.__novel_next_chapter === 'function') {
+                        try { window.__novel_next_chapter(); return 'custom_handler'; } catch(e){}
+                    }
+
                     const selectors = [
                         '#next_url', '.next_page', '#next-chapter', '.next-chapter', '.btn-next',
-                        'a[rel="next"]', 'button.next', 'a.next'
+                        'a[rel="next"]', 'button.next', 'a.next', 'a.nextChapter', '.chapter-next a',
+                        '#nextLink', '.nav-next a', 'a:has(.fa-chevron-right)', 'a:has(.fa-arrow-right)'
                     ];
                     for (let s of selectors) {
                         let el = document.querySelector(s);
-                        if (el) { el.click(); return 'clicked_' + s; }
+                        if (el && el.offsetParent !== null) { el.click(); return 'clicked_' + s; }
                     }
+                    for (let s of selectors) {
+                        let el = document.querySelector(s);
+                        if (el) { el.click(); return 'clicked_fallback_' + s; }
+                    }
+
                     const xpathList = [
-                        "//a[contains(text(), 'ตอนต่อไป') or contains(text(), 'บทถัดไป') or contains(text(), 'ถัดไป')]",
+                        "//a[contains(text(), 'ตอนต่อไป') or contains(text(), 'บทถัดไป') or contains(text(), 'ถัดไป') or contains(text(), 'ตอนหน้า')]",
                         "//a[contains(text(), '下一章') or contains(text(), '下一页') or contains(text(), 'Next Chapter') or contains(text(), 'Next')]",
                         "//button[contains(text(), 'ตอนต่อไป') or contains(text(), 'บทถัดไป') or contains(text(), 'ถัดไป') or contains(text(), 'Next')]"
                     ];
@@ -75,14 +86,24 @@ class NovelTtsBridge(
         mainHandler.post {
             getWebView()?.evaluateJavascript("""
                 (function() {
+                    if (typeof window.__novel_prev_chapter === 'function') {
+                        try { window.__novel_prev_chapter(); return 'custom_handler'; } catch(e){}
+                    }
+
                     const selectors = [
                         '#prev_url', '.prev_page', '#prev-chapter', '.prev-chapter', '.btn-prev',
-                        'a[rel="prev"]', 'button.prev', 'a.prev'
+                        'a[rel="prev"]', 'button.prev', 'a.prev', 'a.prevChapter', '.chapter-prev a',
+                        '#prevLink', '.nav-prev a'
                     ];
                     for (let s of selectors) {
                         let el = document.querySelector(s);
-                        if (el) { el.click(); return 'clicked_' + s; }
+                        if (el && el.offsetParent !== null) { el.click(); return 'clicked_' + s; }
                     }
+                    for (let s of selectors) {
+                        let el = document.querySelector(s);
+                        if (el) { el.click(); return 'clicked_fallback_' + s; }
+                    }
+
                     const xpathList = [
                         "//a[contains(text(), 'ตอนก่อนหน้า') or contains(text(), 'บทก่อนหน้า') or contains(text(), 'ก่อนหน้า')]",
                         "//a[contains(text(), '上一章') or contains(text(), '上一页') or contains(text(), 'Previous Chapter') or contains(text(), 'Prev')]",
@@ -107,7 +128,13 @@ class NovelTtsBridge(
                         window.speechSynthesis.paused = false;
                         window.speechSynthesis.speaking = true;
                     }
-                    const playBtn = document.querySelector('.tts-play, .btn-play, [data-action="play"], #play-button');
+                    if (window.__android_active_utterance_id) {
+                        var utt = (window.__android_tts_utterances || {})[window.__android_active_utterance_id];
+                        if (utt && typeof utt.onresume === 'function') {
+                            utt.onresume({ type: 'resume', utterance: utt });
+                        }
+                    }
+                    const playBtn = document.querySelector('.tts-play, .btn-play, [data-action="play"], #play-button, .reader-play, .audio-play');
                     if (playBtn) { playBtn.click(); }
                 })();
             """.trimIndent(), null)
@@ -122,7 +149,13 @@ class NovelTtsBridge(
                         window.speechSynthesis.paused = true;
                         window.speechSynthesis.speaking = false;
                     }
-                    const pauseBtn = document.querySelector('.tts-pause, .btn-pause, [data-action="pause"], #pause-button');
+                    if (window.__android_active_utterance_id) {
+                        var utt = (window.__android_tts_utterances || {})[window.__android_active_utterance_id];
+                        if (utt && typeof utt.onpause === 'function') {
+                            utt.onpause({ type: 'pause', utterance: utt });
+                        }
+                    }
+                    const pauseBtn = document.querySelector('.tts-pause, .btn-pause, [data-action="pause"], #pause-button, .reader-pause, .audio-pause');
                     if (pauseBtn) { pauseBtn.click(); }
                 })();
             """.trimIndent(), null)
@@ -430,6 +463,7 @@ class NovelTtsBridge(
                         try {
                             const utt = window.__android_tts_utterances[utteranceId];
                             if (event === 'onstart') {
+                                window.__android_active_utterance_id = utteranceId;
                                 if (window.speechSynthesis) {
                                     window.speechSynthesis.speaking = true;
                                     window.speechSynthesis.paused = false;
@@ -444,6 +478,9 @@ class NovelTtsBridge(
                                 }
                                 if (utt) {
                                     delete window.__android_tts_utterances[utteranceId];
+                                    if (window.__android_active_utterance_id === utteranceId) {
+                                        window.__android_active_utterance_id = null;
+                                    }
                                     if (typeof utt.onend === 'function') {
                                         utt.onend({ type: 'end', utterance: utt });
                                     }
@@ -455,6 +492,9 @@ class NovelTtsBridge(
                                 }
                                 if (utt) {
                                     delete window.__android_tts_utterances[utteranceId];
+                                    if (window.__android_active_utterance_id === utteranceId) {
+                                        window.__android_active_utterance_id = null;
+                                    }
                                     if (typeof utt.onerror === 'function') {
                                         utt.onerror({ type: 'error', error: 'native_tts_error', utterance: utt });
                                     }

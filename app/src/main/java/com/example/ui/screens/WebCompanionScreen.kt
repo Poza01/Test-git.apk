@@ -3,6 +3,7 @@ package com.example.ui.screens
 import android.annotation.SuppressLint
 import android.app.DownloadManager
 import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Environment
@@ -36,6 +37,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.ElectricBolt
@@ -319,6 +321,46 @@ fun WebCompanionScreen(
                 }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    // Open Current Page in External Browser (Chrome / ROM Browser)
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xFF222222))
+                            .border(width = 1.dp, color = DarkBorder, shape = RoundedCornerShape(12.dp))
+                            .clickable {
+                                try {
+                                    val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(currentUrl))
+                                    val chooser = Intent.createChooser(browserIntent, "เปิดด้วยเบราว์เซอร์...")
+                                    chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    context.startActivity(chooser)
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "ไม่พบเบราว์เซอร์ในเครื่อง: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                            .padding(horizontal = 8.dp, vertical = 5.dp)
+                            .testTag("open_in_browser_button"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                                contentDescription = "เปิดในเบราว์เซอร์ภายนอก",
+                                tint = Color(0xFFD1D5DB),
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "เปิดใน Chrome",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Medium,
+                                color = Color(0xFFD1D5DB),
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(6.dp))
+
                     // Google Translate Toggle Button
                     Box(
                         modifier = Modifier
@@ -457,6 +499,7 @@ fun WebCompanionScreen(
                         addJavascriptInterface(bridge, NovelTtsBridge.JS_INTERFACE_NAME)
 
                         // Native File Download Listener (.txt, .epub, .pdf, attachments, blob/data)
+                        // Directly opens the ROM / Android system browser chooser (Chrome, etc.)
                         setDownloadListener { url, userAgent, contentDisposition, mimetype, _ ->
                             try {
                                 if (url.startsWith("blob:") || url.startsWith("data:")) {
@@ -485,38 +528,50 @@ fun WebCompanionScreen(
                                     return@setDownloadListener
                                 }
 
-                                val request = DownloadManager.Request(Uri.parse(url)).apply {
-                                    val guessedName = URLUtil.guessFileName(url, contentDisposition, mimetype)
-                                    val fileName = if (guessedName.endsWith(".bin", ignoreCase = true) && (url.contains(".txt") || mimetype.contains("text"))) {
-                                        guessedName.substringBeforeLast(".") + ".txt"
-                                    } else {
-                                        guessedName
-                                    }
-
-                                    val cookies = CookieManager.getInstance().getCookie(url)
-                                    if (!cookies.isNullOrBlank()) {
-                                        addRequestHeader("Cookie", cookies)
-                                    }
-                                    if (userAgent.isNotBlank()) {
-                                        addRequestHeader("User-Agent", userAgent)
-                                    }
-                                    addRequestHeader("Referer", currentUrl)
-
-                                    setTitle(fileName)
-                                    setDescription("กำลังดาวน์โหลดไฟล์...")
-                                    setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                                    setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
-                                    if (mimetype.isNotBlank()) {
-                                        setMimeType(mimetype)
-                                    }
+                                // 1. Prompt ROM / System Chooser to open in Google Chrome or User's preferred browser
+                                val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                 }
-
-                                val dm = ctx.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager
-                                dm?.enqueue(request)
-                                Toast.makeText(ctx, "กำลังเริ่มดาวน์โหลดไฟล์...", Toast.LENGTH_SHORT).show()
+                                val chooser = Intent.createChooser(browserIntent, "เลือกเบราว์เซอร์สำหรับดาวน์โหลดไฟล์...")
+                                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                ctx.startActivity(chooser)
+                                Toast.makeText(ctx, "กำลังเปิดเบราว์เซอร์เพื่อดาวน์โหลด...", Toast.LENGTH_SHORT).show()
                             } catch (e: Exception) {
-                                e.printStackTrace()
-                                Toast.makeText(ctx, "เกิดข้อผิดพลาดในการดาวน์โหลด: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                                // Fallback to DownloadManager if no external browser found
+                                try {
+                                    val request = DownloadManager.Request(Uri.parse(url)).apply {
+                                        val guessedName = URLUtil.guessFileName(url, contentDisposition, mimetype)
+                                        val fileName = if (guessedName.endsWith(".bin", ignoreCase = true) && (url.contains(".txt") || mimetype.contains("text"))) {
+                                            guessedName.substringBeforeLast(".") + ".txt"
+                                        } else {
+                                            guessedName
+                                        }
+
+                                        val cookies = CookieManager.getInstance().getCookie(url)
+                                        if (!cookies.isNullOrBlank()) {
+                                            addRequestHeader("Cookie", cookies)
+                                        }
+                                        if (userAgent.isNotBlank()) {
+                                            addRequestHeader("User-Agent", userAgent)
+                                        }
+                                        addRequestHeader("Referer", currentUrl)
+
+                                        setTitle(fileName)
+                                        setDescription("กำลังดาวน์โหลดไฟล์...")
+                                        setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                                        setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
+                                        if (mimetype.isNotBlank()) {
+                                            setMimeType(mimetype)
+                                        }
+                                    }
+
+                                    val dm = ctx.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager
+                                    dm?.enqueue(request)
+                                    Toast.makeText(ctx, "กำลังดาวน์โหลดไฟล์...", Toast.LENGTH_SHORT).show()
+                                } catch (e2: Exception) {
+                                    e2.printStackTrace()
+                                    Toast.makeText(ctx, "เกิดข้อผิดพลาด: ${e2.localizedMessage}", Toast.LENGTH_LONG).show()
+                                }
                             }
                         }
 
@@ -560,18 +615,42 @@ fun WebCompanionScreen(
                                         }
                                     }, 600)
                                 }
+
+                                // Auto-continue reading next chapter if user was reading
+                                view?.postDelayed({
+                                    view.evaluateJavascript("""
+                                        (function() {
+                                            // Check if novel player / reader has auto-start or autoplay button
+                                            const autoPlayBtn = document.querySelector('.btn-read, .btn-play, #btn-tts, #read-novel, [data-action="auto-read"]');
+                                            if (autoPlayBtn && typeof autoPlayBtn.click === 'function') {
+                                                autoPlayBtn.click();
+                                            }
+                                        })();
+                                    """.trimIndent(), null)
+                                }, 1200)
                             }
 
                             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                                 val reqUrl = request?.url?.toString() ?: return false
-                                // Intercept file download links that end with known extensions
+                                // Intercept file download links that end with known extensions and prompt system chooser
                                 if (reqUrl.endsWith(".txt", ignoreCase = true) ||
                                     reqUrl.endsWith(".epub", ignoreCase = true) ||
                                     reqUrl.endsWith(".pdf", ignoreCase = true) ||
-                                    reqUrl.endsWith(".zip", ignoreCase = true)
+                                    reqUrl.endsWith(".zip", ignoreCase = true) ||
+                                    reqUrl.endsWith(".rar", ignoreCase = true)
                                 ) {
-                                    // Let DownloadListener or custom download handle it
-                                    return false
+                                    try {
+                                        val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(reqUrl)).apply {
+                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        }
+                                        val chooser = Intent.createChooser(browserIntent, "เลือกเบราว์เซอร์สำหรับดาวน์โหลดไฟล์...")
+                                        chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        ctx.startActivity(chooser)
+                                        Toast.makeText(ctx, "กำลังเปิดเบราว์เซอร์เพื่อดาวน์โหลด...", Toast.LENGTH_SHORT).show()
+                                        return true
+                                    } catch (e: Exception) {
+                                        return false
+                                    }
                                 }
                                 return false // Keep navigation inside webview
                             }

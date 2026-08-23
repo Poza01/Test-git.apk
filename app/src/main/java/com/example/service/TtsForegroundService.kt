@@ -181,7 +181,8 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
         if (nextIndex < state.paragraphs.size) {
             speakParagraphInternal(nextIndex)
         } else {
-            // End of playlist
+            // End of chapter playlist - Notify bridge to load next chapter automatically!
+            Log.d(TAG, "Chapter playlist reached end, triggering automatic next chapter transition")
             _playbackState.update {
                 it.copy(
                     isPlaying = false,
@@ -192,7 +193,7 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
                 )
             }
             updateForegroundNotification()
-            stopForegroundIfIdle()
+            com.example.bridge.NovelTtsBridge.notifyNextFromService()
         }
     }
 
