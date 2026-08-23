@@ -452,6 +452,9 @@ fun WebCompanionScreen(
                             ViewGroup.LayoutParams.MATCH_PARENT
                         )
 
+                        // Hardware acceleration for smooth scrolling on Helio G85 Mali GPU
+                        setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
+
                         // Enable cookies and 3rd party cookies for SPA/Auth sites
                         val webViewInstanceRef = this
                         android.webkit.CookieManager.getInstance().apply {
@@ -462,15 +465,15 @@ fun WebCompanionScreen(
                         settings.apply {
                             javaScriptEnabled = true
                             domStorageEnabled = true
-                            databaseEnabled = true
+                            databaseEnabled = false // Reduce SQLite RAM usage
                             mediaPlaybackRequiresUserGesture = false
                             useWideViewPort = true
                             loadWithOverviewMode = true
                             builtInZoomControls = true
                             displayZoomControls = false
-                            allowFileAccess = true
-                            allowContentAccess = true
-                            javaScriptCanOpenWindowsAutomatically = true
+                            allowFileAccess = false
+                            allowContentAccess = false
+                            javaScriptCanOpenWindowsAutomatically = false
                             setSupportMultipleWindows(false)
                             cacheMode = WebSettings.LOAD_DEFAULT
                             mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW

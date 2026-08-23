@@ -96,38 +96,38 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
+            // Configure clean AudioAttributes to avoid audio crackling / distortion
+            try {
+                val audioAttributes = android.media.AudioAttributes.Builder()
+                    .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+                tts?.setAudioAttributes(audioAttributes)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to set audio attributes", e)
+            }
+
             val thaiLocale = Locale("th", "TH")
             val langResult = tts?.setLanguage(thaiLocale)
 
             if (langResult == TextToSpeech.LANG_MISSING_DATA || langResult == TextToSpeech.LANG_NOT_SUPPORTED) {
-                Log.w(TAG, "Thai locale missing data or not supported, trying default")
+                Log.w(TAG, "Thai locale missing data or not supported, falling back to default")
                 tts?.setLanguage(Locale.getDefault())
             }
 
-            // Extract all device voices
-            val voices = extractDeviceVoices()
             val defaultEngine = tts?.defaultEngine ?: "Android TTS"
-
-            val savedRate = prefs.defaultRate
-            val savedPitch = prefs.defaultPitch
-            val savedVoice = prefs.selectedVoice
+            val savedRate = prefs.defaultRate.coerceIn(0.75f, 2.0f)
+            val savedPitch = prefs.defaultPitch.coerceIn(0.8f, 1.2f)
 
             tts?.setSpeechRate(savedRate)
             tts?.setPitch(savedPitch)
-
-            if (!savedVoice.isNullOrBlank()) {
-                val matchingVoice = tts?.voices?.find { it.name == savedVoice }
-                if (matchingVoice != null) {
-                    tts?.voice = matchingVoice
-                }
-            }
 
             _playbackState.update { current ->
                 current.copy(
                     isInitialized = true,
                     engineName = defaultEngine,
-                    availableVoices = voices,
-                    selectedVoiceName = tts?.voice?.name ?: savedVoice,
+                    availableVoices = emptyList(),
+                    selectedVoiceName = "ค่าเริ่มต้นของระบบ ROM",
                     speechRate = savedRate,
                     speechPitch = savedPitch
                 )
@@ -135,7 +135,7 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
 
             setupUtteranceListener()
             updateForegroundNotification()
-            Log.d(TAG, "TextToSpeech initialized with ${voices.size} voices, rate=$savedRate, pitch=$savedPitch")
+            Log.d(TAG, "TextToSpeech initialized with engine=$defaultEngine, rate=$savedRate, pitch=$savedPitch")
 
             // Execute any pending speech requested before initialization was complete
             val pending = pendingSpeechAction
@@ -144,30 +144,6 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
         } else {
             Log.e(TAG, "Failed to initialize TextToSpeech engine, status=$status")
         }
-    }
-
-    private fun extractDeviceVoices(): List<VoiceInfo> {
-        val voiceList = mutableListOf<VoiceInfo>()
-        try {
-            val systemVoices = tts?.voices ?: emptySet()
-            for (v in systemVoices) {
-                val isThai = v.locale.language.equals("th", ignoreCase = true)
-                val voiceInfo = VoiceInfo(
-                    name = v.name,
-                    locale = v.locale.displayName,
-                    isNetworkConnectionRequired = v.isNetworkConnectionRequired,
-                    quality = if (isThai) "Thai Voice" else "Voice (${v.locale.language})"
-                )
-                if (isThai) {
-                    voiceList.add(0, voiceInfo) // Put Thai voices first
-                } else {
-                    voiceList.add(voiceInfo)
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error listing voices", e)
-        }
-        return voiceList
     }
 
     private fun setupUtteranceListener() {

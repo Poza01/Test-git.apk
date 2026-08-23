@@ -27,7 +27,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.zIndex
 import androidx.core.content.ContextCompat
 import com.example.service.TtsForegroundService
 import com.example.service.TtsPlaybackState
@@ -147,28 +149,53 @@ fun MainAppContainer(
                 .padding(innerPadding)
                 .background(Color(0xFF0F0F0F))
         ) {
-            // Screen Content
-            when (currentScreen) {
-                AppScreen.WEB_READER -> {
-                    WebCompanionScreen(
-                        service = service,
-                        isPlayerBarDismissed = isPlayerBarDismissed,
-                        onTogglePlayerBar = {
-                            val newValue = !isPlayerBarDismissed
-                            isPlayerBarDismissed = newValue
-                            prefs.isPlayerBarDismissed = newValue
-                        },
-                        onNavigateToBackgroundSettings = { currentScreen = AppScreen.BACKGROUND_SETTINGS }
+            // 1. WebCompanionScreen is ALWAYS mounted in the hierarchy so the WebView DOM,
+            // loaded URL, TTS audio stream, and translation state are never lost or reloaded!
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(
+                        if (currentScreen == AppScreen.WEB_READER) {
+                            Modifier.zIndex(1f)
+                        } else {
+                            Modifier.zIndex(0f).alpha(0f)
+                        }
                     )
-                }
+            ) {
+                WebCompanionScreen(
+                    service = service,
+                    isPlayerBarDismissed = isPlayerBarDismissed,
+                    onTogglePlayerBar = {
+                        val newValue = !isPlayerBarDismissed
+                        isPlayerBarDismissed = newValue
+                        prefs.isPlayerBarDismissed = newValue
+                    },
+                    onNavigateToBackgroundSettings = { currentScreen = AppScreen.BACKGROUND_SETTINGS }
+                )
+            }
 
-                AppScreen.VOICE_SETTINGS -> {
+            // 2. Voice Settings Screen (Overlay)
+            if (currentScreen == AppScreen.VOICE_SETTINGS) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .zIndex(2f)
+                        .background(Color(0xFF0F0F0F))
+                ) {
                     VoiceSettingsScreen(
                         service = service
                     )
                 }
+            }
 
-                AppScreen.BACKGROUND_SETTINGS -> {
+            // 3. Background Settings Screen (Overlay)
+            if (currentScreen == AppScreen.BACKGROUND_SETTINGS) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .zIndex(2f)
+                        .background(Color(0xFF0F0F0F))
+                ) {
                     HyperOsGuideScreen(
                         service = service
                     )
