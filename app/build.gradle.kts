@@ -56,6 +56,9 @@ android {
     compose = true
     buildConfig = true
   }
+  composeOptions {
+    kotlinCompilerExtensionVersion = "2.0.0"
+  }
   testOptions { unitTests { isIncludeAndroidResources = true } }
   dependenciesInfo {
     includeInApk = false
