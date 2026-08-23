@@ -355,6 +355,13 @@ fun WebCompanionScreen(
                             ViewGroup.LayoutParams.MATCH_PARENT
                         )
 
+                        // Enable cookies and 3rd party cookies for SPA/Auth sites
+                        val webViewInstanceRef = this
+                        android.webkit.CookieManager.getInstance().apply {
+                            setAcceptCookie(true)
+                            setAcceptThirdPartyCookies(webViewInstanceRef, true)
+                        }
+
                         settings.apply {
                             javaScriptEnabled = true
                             domStorageEnabled = true
@@ -365,13 +372,13 @@ fun WebCompanionScreen(
                             builtInZoomControls = true
                             displayZoomControls = false
                             allowFileAccess = true
+                            allowContentAccess = true
+                            javaScriptCanOpenWindowsAutomatically = true
+                            setSupportMultipleWindows(false)
                             cacheMode = WebSettings.LOAD_DEFAULT
                             mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                             userAgentString = "$userAgentString NovelAI-AndroidBridge/1.0"
                         }
-
-                        // Set layer type to hardware for smoother rendering and compatibility
-                        setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
 
                         // Attach the Native TTS JavaScript Bridge
                         addJavascriptInterface(bridge, NovelTtsBridge.JS_INTERFACE_NAME)
