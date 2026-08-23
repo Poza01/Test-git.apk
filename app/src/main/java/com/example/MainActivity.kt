@@ -120,6 +120,13 @@ fun MainAppContainer(
 ) {
     var currentScreen by remember { mutableStateOf(AppScreen.WEB_READER) }
     val playbackState = service?.playbackState?.collectAsState()?.value ?: TtsPlaybackState()
+    var isPlayerBarDismissed by remember { mutableStateOf(false) }
+
+    androidx.compose.runtime.LaunchedEffect(playbackState.isPlaying) {
+        if (playbackState.isPlaying) {
+            isPlayerBarDismissed = false
+        }
+    }
 
     val cycleRate: () -> Unit = {
         val rates = listOf(1.0f, 1.25f, 1.5f, 1.75f, 2.0f, 0.75f)
@@ -172,15 +179,19 @@ fun MainAppContainer(
                 }
             }
 
-            // Global Floating Player Bar (shown whenever playing/paused)
+            // Global Floating Player Bar (shown whenever playing/paused and not dismissed)
             FloatingPlayerBar(
                 state = playbackState,
+                isDismissed = isPlayerBarDismissed,
                 onTogglePlayPause = {
                     if (playbackState.isPlaying) service?.pause() else service?.resume()
                 },
                 onSkipNext = { service?.skipNext() },
                 onSkipPrev = { service?.skipPrevious() },
-                onStop = { service?.stop() },
+                onStop = {
+                    service?.stop()
+                    isPlayerBarDismissed = true
+                },
                 onCycleRate = cycleRate,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)

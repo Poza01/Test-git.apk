@@ -43,6 +43,8 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
 
     private var currentUtteranceId = 0L
 
+    var onUtteranceEvent: ((event: String, utteranceId: String) -> Unit)? = null
+
     inner class LocalBinder : Binder() {
         fun getService(): TtsForegroundService = this@TtsForegroundService
     }
@@ -147,19 +149,38 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
                 serviceScope.launch {
                     _playbackState.update { it.copy(isPlaying = true, isPaused = false) }
                     updateForegroundNotification()
+                    if (!utteranceId.isNullOrBlank()) {
+                        onUtteranceEvent?.invoke("onstart", utteranceId)
+                    }
                 }
             }
 
             override fun onDone(utteranceId: String?) {
                 serviceScope.launch {
-                    handleParagraphCompleted()
+                    if (!utteranceId.isNullOrBlank()) {
+                        onUtteranceEvent?.invoke("ondone", utteranceId)
+                    }
+                    if (utteranceId?.startsWith("web_utt_") == true) {
+                        // Web-driven single utterance completed, wait for web reader's next call
+                        _playbackState.update { it.copy(isPlaying = false, isPaused = false) }
+                        updateForegroundNotification()
+                    } else {
+                        handleParagraphCompleted()
+                    }
                 }
             }
 
             override fun onError(utteranceId: String?) {
                 Log.e(TAG, "Utterance error: $utteranceId")
                 serviceScope.launch {
-                    handleParagraphCompleted()
+                    if (!utteranceId.isNullOrBlank()) {
+                        onUtteranceEvent?.invoke("onerror", utteranceId)
+                    }
+                    if (utteranceId?.startsWith("web_utt_") == true) {
+                        _playbackState.update { it.copy(isPlaying = false, isPaused = false) }
+                    } else {
+                        handleParagraphCompleted()
+                    }
                 }
             }
         })
@@ -179,7 +200,8 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
                     isPlaying = false,
                     isPaused = false,
                     activeParagraphIndex = -1,
-                    currentText = ""
+                    currentText = "",
+                    paragraphs = emptyList()
                 )
             }
             updateForegroundNotification()
@@ -211,6 +233,27 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
         if (text.isBlank()) return
         val paragraphs = text.split("\n\n", "\n").filter { it.isNotBlank() }
         playPlaylist(paragraphs, title, 0)
+    }
+
+    fun speakFromWeb(text: String, title: String, webUtteranceId: String) {
+        val cleanText = text.trim()
+        if (cleanText.isBlank()) return
+
+        _playbackState.update {
+            it.copy(
+                chapterTitle = title.ifBlank { "อ่านนิยายเว็บ" },
+                currentText = cleanText,
+                isPlaying = true,
+                isPaused = false
+            )
+        }
+
+        startAsForegroundService()
+        tts?.setSpeechRate(_playbackState.value.speechRate)
+        tts?.setPitch(_playbackState.value.speechPitch)
+
+        val utteranceId = "web_utt_$webUtteranceId"
+        tts?.speak(cleanText, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
     }
 
     private fun speakParagraphInternal(index: Int) {
@@ -267,7 +310,8 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
                 isPlaying = false,
                 isPaused = false,
                 activeParagraphIndex = -1,
-                currentText = ""
+                currentText = "",
+                paragraphs = emptyList()
             )
         }
         stopForegroundIfIdle()

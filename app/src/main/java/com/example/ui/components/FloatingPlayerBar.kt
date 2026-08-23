@@ -57,10 +57,11 @@ fun FloatingPlayerBar(
     onSkipPrev: () -> Unit,
     onStop: () -> Unit,
     onCycleRate: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isDismissed: Boolean = false
 ) {
     AnimatedVisibility(
-        visible = state.isPlaying || state.isPaused || state.paragraphs.isNotEmpty(),
+        visible = !isDismissed && (state.isPlaying || state.isPaused),
         enter = slideInVertically { it } + fadeIn(),
         exit = slideOutVertically { it } + fadeOut(),
         modifier = modifier

@@ -16,10 +16,32 @@ class NovelTtsBridge(
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
 
+    fun attachServiceListener() {
+        val service = getService() ?: return
+        service.onUtteranceEvent = { event, utteranceId ->
+            mainHandler.post {
+                val cleanId = utteranceId.removePrefix("web_utt_")
+                val js = "if (window.__android_tts_callback) { window.__android_tts_callback('$event', '$cleanId'); }"
+                getWebView()?.evaluateJavascript(js, null)
+            }
+        }
+    }
+
+    @JavascriptInterface
+    fun speakFromWeb(text: String?, title: String?, utteranceId: String?) {
+        if (text.isNullOrBlank()) return
+        val uttId = utteranceId ?: "0"
+        mainHandler.post {
+            attachServiceListener()
+            getService()?.speakFromWeb(text, title ?: "อ่านนิยายเว็บ", uttId)
+        }
+    }
+
     @JavascriptInterface
     fun speak(text: String?, title: String?) {
         if (text.isNullOrBlank()) return
         mainHandler.post {
+            attachServiceListener()
             getService()?.playSingleText(text, title ?: "อ่านนิยาย")
         }
     }
@@ -35,11 +57,12 @@ class NovelTtsBridge(
                 if (item.isNotBlank()) list.add(item)
             }
             mainHandler.post {
+                attachServiceListener()
                 getService()?.playPlaylist(list, title ?: "อ่านนิยาย", startIndex)
             }
         } catch (e: Exception) {
-            // If it was just a plain string, fallback to speak
             mainHandler.post {
+                attachServiceListener()
                 getService()?.playSingleText(paragraphsJson, title ?: "อ่านนิยาย")
             }
         }
@@ -101,12 +124,13 @@ class NovelTtsBridge(
         /**
          * Comprehensive Web Speech API (SpeechSynthesis & SpeechSynthesisUtterance) Polyfill Script
          * Injected into the WebView to provide full standard getVoices(), speak(), pause(), cancel(),
-         * and redirect all reading requests to the robust Android Native Foreground Service.
+         * and bidirectional callback support (onstart, onend, onerror) so automatic continuous paragraph
+         * progression on web novel readers works seamlessly.
          */
         const val INJECTION_SCRIPT = """
             (function() {
                 try {
-                    console.log("[NovelAI Android Bridge] Initializing Full Web Speech & TTS Bridge");
+                    console.log("[NovelAI Android Bridge] Initializing Full Web Speech & TTS Bridge v2");
 
                     // 1. Prepare speech synthesis voices polyfill
                     let cachedVoices = [];
@@ -137,7 +161,7 @@ class NovelTtsBridge(
                     }
                     updateVoicesFromBridge();
 
-                    // 2. Ensure SpeechSynthesisUtterance exists
+                    // 2. Ensure SpeechSynthesisUtterance constructor
                     if (typeof window.SpeechSynthesisUtterance === 'undefined') {
                         window.SpeechSynthesisUtterance = function(text) {
                             this.text = text || '';
@@ -154,7 +178,51 @@ class NovelTtsBridge(
                         };
                     }
 
-                    // 3. Complete SpeechSynthesis Mock / Wrapper
+                    // 3. Utterance Tracking Map for callbacks
+                    window.__android_tts_utterances = window.__android_tts_utterances || {};
+                    let uttCounter = 0;
+
+                    // Global Android -> JS Event Dispatcher
+                    window.__android_tts_callback = function(event, utteranceId) {
+                        try {
+                            const utt = window.__android_tts_utterances[utteranceId];
+                            if (event === 'onstart') {
+                                if (window.speechSynthesis) {
+                                    window.speechSynthesis.speaking = true;
+                                    window.speechSynthesis.paused = false;
+                                }
+                                if (utt && typeof utt.onstart === 'function') {
+                                    utt.onstart({ type: 'start', utterance: utt });
+                                }
+                            } else if (event === 'ondone') {
+                                if (window.speechSynthesis) {
+                                    window.speechSynthesis.speaking = false;
+                                    window.speechSynthesis.paused = false;
+                                }
+                                if (utt) {
+                                    delete window.__android_tts_utterances[utteranceId];
+                                    if (typeof utt.onend === 'function') {
+                                        utt.onend({ type: 'end', utterance: utt });
+                                    }
+                                }
+                            } else if (event === 'onerror') {
+                                if (window.speechSynthesis) {
+                                    window.speechSynthesis.speaking = false;
+                                    window.speechSynthesis.paused = false;
+                                }
+                                if (utt) {
+                                    delete window.__android_tts_utterances[utteranceId];
+                                    if (typeof utt.onerror === 'function') {
+                                        utt.onerror({ type: 'error', error: 'native_tts_error', utterance: utt });
+                                    }
+                                }
+                            }
+                        } catch(cbErr) {
+                            console.error("[TTS Callback Error]", cbErr);
+                        }
+                    };
+
+                    // 4. Complete SpeechSynthesis Mock / Wrapper
                     const synth = {
                         speaking: false,
                         paused: false,
@@ -166,28 +234,32 @@ class NovelTtsBridge(
                         },
                         speak: function(utterance) {
                             try {
-                                const text = utterance ? (utterance.text || utterance) : '';
-                                if (!text || text.trim().length === 0) return;
-                                
-                                if (utterance && utterance.rate) {
-                                    if (window.AndroidTtsBridge && window.AndroidTtsBridge.setRate) {
-                                        window.AndroidTtsBridge.setRate(utterance.rate);
+                                if (!utterance) return;
+                                const text = (typeof utterance === 'string') ? utterance : (utterance.text || '');
+                                if (!text || text.trim().length === 0) {
+                                    if (utterance && typeof utterance.onend === 'function') {
+                                        setTimeout(() => utterance.onend({ type: 'end', utterance: utterance }), 10);
                                     }
-                                }
-                                if (utterance && utterance.pitch) {
-                                    if (window.AndroidTtsBridge && window.AndroidTtsBridge.setPitch) {
-                                        window.AndroidTtsBridge.setPitch(utterance.pitch);
-                                    }
-                                }
-                                if (utterance && utterance.voice && utterance.voice.name) {
-                                    if (window.AndroidTtsBridge && window.AndroidTtsBridge.setVoice) {
-                                        window.AndroidTtsBridge.setVoice(utterance.voice.name);
-                                    }
+                                    return;
                                 }
 
-                                if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.speak === 'function') {
+                                const id = "utt_" + (++uttCounter);
+                                window.__android_tts_utterances[id] = utterance;
+
+                                if (utterance.rate && window.AndroidTtsBridge && window.AndroidTtsBridge.setRate) {
+                                    window.AndroidTtsBridge.setRate(utterance.rate);
+                                }
+                                if (utterance.pitch && window.AndroidTtsBridge && window.AndroidTtsBridge.setPitch) {
+                                    window.AndroidTtsBridge.setPitch(utterance.pitch);
+                                }
+                                if (utterance.voice && utterance.voice.name && window.AndroidTtsBridge && window.AndroidTtsBridge.setVoice) {
+                                    window.AndroidTtsBridge.setVoice(utterance.voice.name);
+                                }
+
+                                if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.speakFromWeb === 'function') {
+                                    window.AndroidTtsBridge.speakFromWeb(text, document.title || "อ่านนิยาย", id);
+                                } else if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.speak === 'function') {
                                     window.AndroidTtsBridge.speak(text, document.title || "อ่านนิยาย");
-                                    if (utterance && typeof utterance.onstart === 'function') utterance.onstart({ type: 'start' });
                                 }
                             } catch(err) {
                                 console.error("[Bridge speak error]", err);
@@ -196,6 +268,9 @@ class NovelTtsBridge(
                         },
                         cancel: function() {
                             try {
+                                window.__android_tts_utterances = {};
+                                synth.speaking = false;
+                                synth.paused = false;
                                 if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.stop === 'function') {
                                     window.AndroidTtsBridge.stop();
                                 }
@@ -203,6 +278,7 @@ class NovelTtsBridge(
                         },
                         pause: function() {
                             try {
+                                synth.paused = true;
                                 if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.pause === 'function') {
                                     window.AndroidTtsBridge.pause();
                                 }
@@ -210,6 +286,7 @@ class NovelTtsBridge(
                         },
                         resume: function() {
                             try {
+                                synth.paused = false;
                                 if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.resume === 'function') {
                                     window.AndroidTtsBridge.resume();
                                 }
@@ -217,30 +294,14 @@ class NovelTtsBridge(
                         }
                     };
 
-                    // Overwrite or create window.speechSynthesis
-                    if (!window.speechSynthesis || typeof window.speechSynthesis.getVoices !== 'function') {
-                        Object.defineProperty(window, 'speechSynthesis', {
-                            value: synth,
-                            writable: true,
-                            configurable: true
-                        });
-                    } else {
-                        // Patch existing methods to guarantee bridge delegation
-                        window.speechSynthesis.getVoices = synth.getVoices;
-                        const origSpeak = window.speechSynthesis.speak.bind(window.speechSynthesis);
-                        window.speechSynthesis.speak = function(utterance) {
-                            if (window.AndroidTtsBridge) {
-                                synth.speak(utterance);
-                            } else {
-                                origSpeak(utterance);
-                            }
-                        };
-                        window.speechSynthesis.cancel = synth.cancel;
-                        window.speechSynthesis.pause = synth.pause;
-                        window.speechSynthesis.resume = synth.resume;
-                    }
+                    // Overwrite window.speechSynthesis
+                    Object.defineProperty(window, 'speechSynthesis', {
+                        value: synth,
+                        writable: true,
+                        configurable: true
+                    });
 
-                    // Dispatch onvoiceschanged event for web novel reader scripts
+                    // Dispatch onvoiceschanged
                     setTimeout(function() {
                         try {
                             if (window.speechSynthesis && typeof window.speechSynthesis.onvoiceschanged === 'function') {
@@ -248,9 +309,9 @@ class NovelTtsBridge(
                             }
                             window.dispatchEvent(new Event('voiceschanged'));
                         } catch(e) {}
-                    }, 100);
+                    }, 50);
 
-                    // 4. Expose convenient novel reader helper functions
+                    // 5. Expose convenient novel reader helper functions
                     window.readWithAndroidTts = function(text, title) {
                         if (window.AndroidTtsBridge) {
                             window.AndroidTtsBridge.speak(text, title || document.title);
@@ -266,7 +327,7 @@ class NovelTtsBridge(
                         }
                     };
 
-                    console.log("[NovelAI Android Bridge] Web Speech Polyfill successfully installed.");
+                    console.log("[NovelAI Android Bridge] Bidirectional Web Speech Polyfill successfully installed.");
                 } catch(globalErr) {
                     console.error("[NovelAI Bridge Fatal]", globalErr);
                 }

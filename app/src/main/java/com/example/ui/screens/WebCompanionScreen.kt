@@ -102,6 +102,10 @@ fun WebCompanionScreen(
         )
     }
 
+    androidx.compose.runtime.LaunchedEffect(service, webViewInstance) {
+        bridge.attachServiceListener()
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
