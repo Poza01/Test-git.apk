@@ -1,14 +1,21 @@
 package com.example.ui.screens
 
 import android.annotation.SuppressLint
+import android.app.DownloadManager
+import android.content.Context
 import android.graphics.Bitmap
+import android.net.Uri
+import android.os.Environment
 import android.view.ViewGroup
 import android.webkit.ConsoleMessage
+import android.webkit.CookieManager
+import android.webkit.URLUtil
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -76,6 +83,7 @@ import com.example.ui.theme.AmberPrimary
 import com.example.ui.theme.AmberSecondary
 import com.example.ui.theme.DarkBorder
 import com.example.ui.theme.DarkSurface
+import kotlinx.coroutines.delay
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -112,6 +120,16 @@ fun WebCompanionScreen(
         )
     }
 
+    // Safety timeout: Reset translating spinner after 6 seconds if not received callback
+    LaunchedEffect(isTranslating) {
+        if (isTranslating) {
+            delay(6000)
+            if (isTranslating) {
+                isTranslating = false
+            }
+        }
+    }
+
     LaunchedEffect(service, webViewInstance) {
         bridge.attachServiceListener()
         webViewInstance?.evaluateJavascript("""
@@ -122,7 +140,7 @@ fun WebCompanionScreen(
             })();
         """.trimIndent(), null)
 
-        bridge.onTranslationStatusChange = { status, lang ->
+        bridge.onTranslationStatusChange = { status, _ ->
             when (status) {
                 "translating" -> {
                     isTranslating = true
@@ -134,11 +152,6 @@ fun WebCompanionScreen(
                 "original" -> {
                     isTranslating = false
                     isTranslated = false
-                }
-                "ready" -> {
-                    if (isAutoTranslate) {
-                        bridge.translatePage(targetLang)
-                    }
                 }
                 "error" -> {
                     isTranslating = false
@@ -377,6 +390,8 @@ fun WebCompanionScreen(
                 bridge.translatePage(lang)
             },
             onRestoreOriginal = {
+                isTranslated = false
+                isTranslating = false
                 bridge.restoreOriginal()
             },
             onToggleAutoTranslate = { enabled ->
@@ -384,6 +399,10 @@ fun WebCompanionScreen(
                 prefs.isAutoTranslate = enabled
                 if (enabled) {
                     bridge.translatePage(targetLang)
+                } else {
+                    isTranslated = false
+                    isTranslating = false
+                    bridge.restoreOriginal()
                 }
             },
             onCloseBar = {
@@ -437,11 +456,76 @@ fun WebCompanionScreen(
                         // Attach the Native TTS JavaScript Bridge
                         addJavascriptInterface(bridge, NovelTtsBridge.JS_INTERFACE_NAME)
 
+                        // Native File Download Listener (.txt, .epub, .pdf, attachments, blob/data)
+                        setDownloadListener { url, userAgent, contentDisposition, mimetype, _ ->
+                            try {
+                                if (url.startsWith("blob:") || url.startsWith("data:")) {
+                                    evaluateJavascript("""
+                                        (function() {
+                                            fetch('$url')
+                                                .then(function(r) { return r.blob(); })
+                                                .then(function(blob) {
+                                                    var reader = new FileReader();
+                                                    reader.onloadend = function() {
+                                                        if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.saveBase64File === 'function') {
+                                                            window.AndroidTtsBridge.saveBase64File(
+                                                                reader.result,
+                                                                blob.type || '${mimetype ?: "text/plain"}',
+                                                                'novel_${System.currentTimeMillis()}.txt'
+                                                            );
+                                                        }
+                                                    };
+                                                    reader.readAsDataURL(blob);
+                                                })
+                                                .catch(function(err) {
+                                                    console.error(err);
+                                                });
+                                        })();
+                                    """.trimIndent(), null)
+                                    return@setDownloadListener
+                                }
+
+                                val request = DownloadManager.Request(Uri.parse(url)).apply {
+                                    val guessedName = URLUtil.guessFileName(url, contentDisposition, mimetype)
+                                    val fileName = if (guessedName.endsWith(".bin", ignoreCase = true) && (url.contains(".txt") || mimetype.contains("text"))) {
+                                        guessedName.substringBeforeLast(".") + ".txt"
+                                    } else {
+                                        guessedName
+                                    }
+
+                                    val cookies = CookieManager.getInstance().getCookie(url)
+                                    if (!cookies.isNullOrBlank()) {
+                                        addRequestHeader("Cookie", cookies)
+                                    }
+                                    if (userAgent.isNotBlank()) {
+                                        addRequestHeader("User-Agent", userAgent)
+                                    }
+                                    addRequestHeader("Referer", currentUrl)
+
+                                    setTitle(fileName)
+                                    setDescription("กำลังดาวน์โหลดไฟล์...")
+                                    setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                                    setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
+                                    if (mimetype.isNotBlank()) {
+                                        setMimeType(mimetype)
+                                    }
+                                }
+
+                                val dm = ctx.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager
+                                dm?.enqueue(request)
+                                Toast.makeText(ctx, "กำลังเริ่มดาวน์โหลดไฟล์...", Toast.LENGTH_SHORT).show()
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                                Toast.makeText(ctx, "เกิดข้อผิดพลาดในการดาวน์โหลด: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                            }
+                        }
+
                         webViewClient = object : WebViewClient() {
                             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                                 super.onPageStarted(view, url, favicon)
                                 isLoading = true
                                 isTranslated = false
+                                isTranslating = false
                                 if (url != null) {
                                     inputUrl = url
                                     currentUrl = url
@@ -468,15 +552,27 @@ fun WebCompanionScreen(
                                 view?.evaluateJavascript(NovelTtsBridge.TRANSLATE_INJECTION_SCRIPT, null)
                                 view?.evaluateJavascript("if (window.__android_tts_sync_ready) window.__android_tts_sync_ready();", null)
 
-                                // If auto-translate is enabled, trigger translation
+                                // ONLY trigger translation if auto-translate is explicitly enabled
                                 if (prefs.isAutoTranslate) {
                                     view?.postDelayed({
-                                        bridge.translatePage(prefs.targetLanguage)
-                                    }, 400)
+                                        if (prefs.isAutoTranslate) {
+                                            bridge.translatePage(prefs.targetLanguage)
+                                        }
+                                    }, 600)
                                 }
                             }
 
                             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                                val reqUrl = request?.url?.toString() ?: return false
+                                // Intercept file download links that end with known extensions
+                                if (reqUrl.endsWith(".txt", ignoreCase = true) ||
+                                    reqUrl.endsWith(".epub", ignoreCase = true) ||
+                                    reqUrl.endsWith(".pdf", ignoreCase = true) ||
+                                    reqUrl.endsWith(".zip", ignoreCase = true)
+                                ) {
+                                    // Let DownloadListener or custom download handle it
+                                    return false
+                                }
                                 return false // Keep navigation inside webview
                             }
                         }

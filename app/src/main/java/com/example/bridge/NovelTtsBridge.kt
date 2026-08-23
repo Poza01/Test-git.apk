@@ -1,13 +1,21 @@
 package com.example.bridge
 
+import android.content.ContentValues
 import android.content.Context
+import android.os.Build
+import android.os.Environment
 import android.os.Handler
 import android.os.Looper
+import android.provider.MediaStore
+import android.util.Base64
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
+import android.widget.Toast
 import com.example.service.TtsForegroundService
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
+import java.io.FileOutputStream
 
 class NovelTtsBridge(
     private val context: Context,
@@ -278,6 +286,61 @@ class NovelTtsBridge(
     @JavascriptInterface
     fun isAppBridgeActive(): Boolean = true
 
+    @JavascriptInterface
+    fun saveBase64File(base64Data: String?, mimeType: String?, fileName: String?) {
+        if (base64Data.isNullOrBlank()) return
+        val rawName = (fileName?.ifBlank { null } ?: "novel_${System.currentTimeMillis()}.txt")
+        val cleanFileName = rawName.replace("[/\\\\:*?\"<>|]".toRegex(), "_")
+        val cleanMime = mimeType?.ifBlank { null } ?: if (cleanFileName.endsWith(".txt", ignoreCase = true)) "text/plain" else "application/octet-stream"
+
+        Thread {
+            try {
+                val pureBase64 = if (base64Data.contains(",")) {
+                    base64Data.substringAfter(",")
+                } else {
+                    base64Data
+                }
+                val bytes = Base64.decode(pureBase64, Base64.DEFAULT)
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    val values = ContentValues().apply {
+                        put(MediaStore.MediaColumns.DISPLAY_NAME, cleanFileName)
+                        put(MediaStore.MediaColumns.MIME_TYPE, cleanMime)
+                        put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                        put(MediaStore.MediaColumns.IS_PENDING, 1)
+                    }
+                    val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                    if (uri != null) {
+                        context.contentResolver.openOutputStream(uri)?.use { os ->
+                            os.write(bytes)
+                            os.flush()
+                        }
+                        values.clear()
+                        values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                        context.contentResolver.update(uri, values, null, null)
+                    }
+                } else {
+                    val downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                    if (!downloadDir.exists()) downloadDir.mkdirs()
+                    val targetFile = File(downloadDir, cleanFileName)
+                    FileOutputStream(targetFile).use { fos ->
+                        fos.write(bytes)
+                        fos.flush()
+                    }
+                }
+
+                mainHandler.post {
+                    Toast.makeText(context, "ดาวน์โหลดไฟล์สำเร็จ: $cleanFileName\n(บันทึกในโฟลเดอร์ Download)", Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                mainHandler.post {
+                    Toast.makeText(context, "เกิดข้อผิดพลาดในการบันทึกไฟล์: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }.start()
+    }
+
     companion object {
         const val JS_INTERFACE_NAME = "AndroidTtsBridge"
 
@@ -516,7 +579,56 @@ class NovelTtsBridge(
                         }
                     };
 
-                    console.log("[NovelAI Android Bridge] Bidirectional Web Speech Polyfill successfully installed.");
+                    // 6. Universal Client-Side Download Interceptor (.txt / Blob / Data URLs)
+                    try {
+                        document.addEventListener('click', function(e) {
+                            var target = e.target;
+                            while (target && target !== document.body && target.tagName !== 'A') {
+                                target = target.parentElement;
+                            }
+                            if (target && target.tagName === 'A') {
+                                var href = target.href || '';
+                                var downloadAttr = target.getAttribute('download');
+                                if (downloadAttr !== null || href.startsWith('blob:') || href.startsWith('data:')) {
+                                    if (href.startsWith('blob:') || href.startsWith('data:')) {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        var fname = downloadAttr || ('novel_' + Date.now() + '.txt');
+                                        fetch(href)
+                                            .then(function(res) { return res.blob(); })
+                                            .then(function(blob) {
+                                                var reader = new FileReader();
+                                                reader.onloadend = function() {
+                                                    if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.saveBase64File === 'function') {
+                                                        window.AndroidTtsBridge.saveBase64File(reader.result, blob.type || 'text/plain', fname);
+                                                    }
+                                                };
+                                                reader.readAsDataURL(blob);
+                                            })
+                                            .catch(function(err) {
+                                                console.error("[Download Blob Error]", err);
+                                            });
+                                    }
+                                }
+                            }
+                        }, true);
+
+                        if (typeof window.saveAs === 'undefined') {
+                            window.saveAs = function(blob, filename) {
+                                var reader = new FileReader();
+                                reader.onloadend = function() {
+                                    if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.saveBase64File === 'function') {
+                                        window.AndroidTtsBridge.saveBase64File(reader.result, (blob && blob.type) || 'text/plain', filename || ('novel_' + Date.now() + '.txt'));
+                                    }
+                                };
+                                reader.readAsDataURL(blob);
+                            };
+                        }
+                    } catch(dlErr) {
+                        console.error("[Download Interceptor Error]", dlErr);
+                    }
+
+                    console.log("[NovelAI Android Bridge] Bidirectional Web Speech & Download Polyfill successfully installed.");
                 } catch(globalErr) {
                     console.error("[NovelAI Bridge Fatal]", globalErr);
                 }
@@ -570,15 +682,12 @@ class NovelTtsBridge(
                                 autoDisplay: false,
                                 multilanguagePage: true
                             }, 'google_translate_element');
-                            if (window.AndroidTtsBridge && window.AndroidTtsBridge.onTranslationStatus) {
-                                window.AndroidTtsBridge.onTranslationStatus('ready', '');
-                            }
                         } catch(e) {
                             console.error('Google Translate Init Error', e);
                         }
                     };
 
-                    // 4. Load Google Translate SDK
+                    // 4. Load Google Translate SDK on demand
                     function loadGoogleTranslateScript() {
                         ensureTranslateElement();
                         if (!document.getElementById('google-translate-script')) {
@@ -590,29 +699,40 @@ class NovelTtsBridge(
                         }
                     }
 
+                    window.__chrome_translate_interval = null;
+
                     // 5. Trigger Translation
                     window.__chrome_translate_to = function(targetLang) {
                         try {
                             ensureTranslateElement();
                             loadGoogleTranslateScript();
 
+                            if (window.__chrome_translate_interval) {
+                                clearInterval(window.__chrome_translate_interval);
+                                window.__chrome_translate_interval = null;
+                            }
+
                             if (window.AndroidTtsBridge && window.AndroidTtsBridge.onTranslationStatus) {
                                 window.AndroidTtsBridge.onTranslationStatus('translating', targetLang);
                             }
 
                             var attempts = 0;
-                            var interval = setInterval(function() {
+                            window.__chrome_translate_interval = setInterval(function() {
                                 attempts++;
                                 var select = document.querySelector('.goog-te-combo');
                                 if (select) {
-                                    clearInterval(interval);
-                                    select.value = targetLang;
-                                    select.dispatchEvent(new Event('change'));
+                                    clearInterval(window.__chrome_translate_interval);
+                                    window.__chrome_translate_interval = null;
+                                    if (select.value !== targetLang) {
+                                        select.value = targetLang;
+                                        select.dispatchEvent(new Event('change'));
+                                    }
                                     if (window.AndroidTtsBridge && window.AndroidTtsBridge.onTranslationStatus) {
                                         window.AndroidTtsBridge.onTranslationStatus('translated', targetLang);
                                     }
-                                } else if (attempts > 25) {
-                                    clearInterval(interval);
+                                } else if (attempts > 20) {
+                                    clearInterval(window.__chrome_translate_interval);
+                                    window.__chrome_translate_interval = null;
                                     // Fallback: Cookie method
                                     document.cookie = "googtrans=/auto/" + targetLang + "; path=/; domain=" + location.hostname;
                                     document.cookie = "googtrans=/auto/" + targetLang + "; path=/;";
@@ -620,7 +740,7 @@ class NovelTtsBridge(
                                         window.AndroidTtsBridge.onTranslationStatus('translated', targetLang);
                                     }
                                 }
-                            }, 120);
+                            }, 150);
                         } catch(e) {
                             console.error("Translate error", e);
                             if (window.AndroidTtsBridge && window.AndroidTtsBridge.onTranslationStatus) {
@@ -632,6 +752,10 @@ class NovelTtsBridge(
                     // 6. Restore Original
                     window.__chrome_translate_restore = function() {
                         try {
+                            if (window.__chrome_translate_interval) {
+                                clearInterval(window.__chrome_translate_interval);
+                                window.__chrome_translate_interval = null;
+                            }
                             var select = document.querySelector('.goog-te-combo');
                             if (select) {
                                 var origOption = select.querySelector('option[value=""]') || select.options[0];
