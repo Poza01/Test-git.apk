@@ -1,0 +1,40 @@
+name: Build and Release Android APK
+
+on:
+  push:
+    branches: [ "**" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Java JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Decode Debug Keystore (if present)
+        run: |
+          if [ -f debug.keystore.base64 ]; then
+            base64 -d debug.keystore.base64 > debug.keystore || true
+          fi
+
+      - name: Build Debug APK with Gradle
+        run: gradle assembleDebug --stacktrace
+
+      - name: Upload APK to GitHub Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: NovelAI-TTS-Debug-APK
+          path: app/build/outputs/apk/debug/*.apk
+          retention-days: 14
