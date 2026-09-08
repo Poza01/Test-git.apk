@@ -43,6 +43,8 @@ import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.ElectricBolt
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.MenuOpen
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Translate
@@ -91,7 +93,9 @@ import kotlinx.coroutines.delay
 @Composable
 fun WebCompanionScreen(
     service: TtsForegroundService?,
-    onNavigateToBackgroundSettings: () -> Unit,
+    isBottomNavVisible: Boolean = false,
+    onToggleBottomNav: () -> Unit = {},
+    onNavigateToBackgroundSettings: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -321,39 +325,36 @@ fun WebCompanionScreen(
                 }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    // Open Current Page in External Browser (Chrome / ROM Browser)
+                    // Toggle Bottom 3-Menu Bar (ซ่อน/เปิด 3 เมนูล่าง)
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(12.dp))
-                            .background(Color(0xFF222222))
-                            .border(width = 1.dp, color = DarkBorder, shape = RoundedCornerShape(12.dp))
+                            .background(if (isBottomNavVisible) Color(0xFF222222) else AmberPrimary.copy(alpha = 0.2f))
+                            .border(
+                                width = 1.dp,
+                                color = if (isBottomNavVisible) DarkBorder else AmberPrimary,
+                                shape = RoundedCornerShape(12.dp)
+                            )
                             .clickable {
-                                try {
-                                    val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(currentUrl))
-                                    val chooser = Intent.createChooser(browserIntent, "เปิดด้วยเบราว์เซอร์...")
-                                    chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    context.startActivity(chooser)
-                                } catch (e: Exception) {
-                                    Toast.makeText(context, "ไม่พบเบราว์เซอร์ในเครื่อง: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
-                                }
+                                onToggleBottomNav()
                             }
                             .padding(horizontal = 8.dp, vertical = 5.dp)
-                            .testTag("open_in_browser_button"),
+                            .testTag("toggle_bottom_nav_button"),
                         contentAlignment = Alignment.Center
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
-                                imageVector = Icons.AutoMirrored.Filled.OpenInNew,
-                                contentDescription = "เปิดในเบราว์เซอร์ภายนอก",
-                                tint = Color(0xFFD1D5DB),
+                                imageVector = if (isBottomNavVisible) Icons.Default.MenuOpen else Icons.Default.Menu,
+                                contentDescription = if (isBottomNavVisible) "ซ่อน 3 เมนูล่าง" else "แสดง 3 เมนูล่าง",
+                                tint = if (isBottomNavVisible) Color(0xFFD1D5DB) else AmberPrimary,
                                 modifier = Modifier.size(14.dp)
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = "เปิดใน Chrome",
+                                text = if (isBottomNavVisible) "ซ่อนเมนู" else "แสดงเมนู",
                                 style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Medium,
-                                color = Color(0xFFD1D5DB),
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (isBottomNavVisible) Color(0xFFD1D5DB) else AmberPrimary,
                                 fontSize = 11.sp
                             )
                         }
@@ -434,7 +435,10 @@ fun WebCompanionScreen(
             onRestoreOriginal = {
                 isTranslated = false
                 isTranslating = false
+                isAutoTranslate = false
+                prefs.isAutoTranslate = false
                 bridge.restoreOriginal()
+                Toast.makeText(context, "กลับสู่เนื้อหาต้นฉบับแล้ว", Toast.LENGTH_SHORT).show()
             },
             onToggleAutoTranslate = { enabled ->
                 isAutoTranslate = enabled
@@ -445,6 +449,7 @@ fun WebCompanionScreen(
                     isTranslated = false
                     isTranslating = false
                     bridge.restoreOriginal()
+                    Toast.makeText(context, "ปิดการแปลอัตโนมัติและกลับต้นฉบับแล้ว", Toast.LENGTH_SHORT).show()
                 }
             },
             onCloseBar = {

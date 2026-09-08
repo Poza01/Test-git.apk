@@ -162,6 +162,15 @@ class NovelTtsBridge(
         }
     }
 
+    var onScrollDirectionChange: ((Boolean) -> Unit)? = null
+
+    @JavascriptInterface
+    fun onScrollDirection(isDown: Boolean) {
+        mainHandler.post {
+            onScrollDirectionChange?.invoke(isDown)
+        }
+    }
+
     @JavascriptInterface
     fun onTranslationStatus(status: String?, lang: String?) {
         val s = status ?: ""
@@ -186,14 +195,31 @@ class NovelTtsBridge(
 
     fun restoreOriginal() {
         mainHandler.post {
+            val wv = getWebView()
+            val current = wv?.url
+            if (!current.isNullOrBlank()) {
+                try {
+                    val cookieManager = android.webkit.CookieManager.getInstance()
+                    val uri = android.net.Uri.parse(current)
+                    val host = uri.host ?: ""
+                    cookieManager.setCookie(current, "googtrans=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/")
+                    cookieManager.setCookie(current, "googtrans=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; domain=$host")
+                    cookieManager.setCookie(current, "googtrans=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; domain=.$host")
+                    cookieManager.flush()
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
             val js = """
                 (function() {
-                    if (typeof window.__chrome_translate_restore === 'function') {
-                        window.__chrome_translate_restore();
-                    }
+                    try {
+                        if (typeof window.__chrome_translate_restore === 'function') {
+                            window.__chrome_translate_restore();
+                        }
+                    } catch(e){}
                 })();
             """.trimIndent()
-            getWebView()?.evaluateJavascript(js, null)
+            wv?.evaluateJavascript(js, null)
         }
     }
 
@@ -796,25 +822,53 @@ class NovelTtsBridge(
                                 clearInterval(window.__chrome_translate_interval);
                                 window.__chrome_translate_interval = null;
                             }
+                            var host = location.hostname;
+                            var domains = [host, '.' + host, ''];
+                            var parts = host.split('.');
+                            while (parts.length > 1) {
+                                domains.push('.' + parts.join('.'));
+                                parts.shift();
+                            }
+                            var paths = ['/', location.pathname, ''];
+                            domains.forEach(function(d) {
+                                paths.forEach(function(p) {
+                                    document.cookie = 'googtrans=; expires=Thu, 01 Jan 1970 00:00:00 UTC;' + (d ? ' domain=' + d + ';' : '') + (p ? ' path=' + p + ';' : '');
+                                });
+                            });
+
+                            // 1. Try restore button inside Google Translate banner iframes
+                            try {
+                                var iframes = document.querySelectorAll('iframe.goog-te-banner-frame, iframe[class*="goog-te"]');
+                                iframes.forEach(function(iframe) {
+                                    try {
+                                        var innerDoc = iframe.contentDocument || iframe.contentWindow.document;
+                                        var restoreBtn = innerDoc.querySelector('button[id*="restore"], .goog-te-button button, [id*="restore"]');
+                                        if (restoreBtn) restoreBtn.click();
+                                    } catch(err){}
+                                });
+                            } catch(e){}
+
+                            // 2. Select original option in dropdown
                             var select = document.querySelector('.goog-te-combo');
                             if (select) {
                                 var origOption = select.querySelector('option[value=""]') || select.options[0];
                                 if (origOption) {
                                     select.value = origOption.value;
-                                    select.dispatchEvent(new Event('change'));
+                                    select.dispatchEvent(new Event('change', { bubbles: true }));
                                 }
                             }
-                            document.cookie = "googtrans=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; domain=" + location.hostname;
-                            document.cookie = "googtrans=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
 
-                            var iframe = document.querySelector('.goog-te-banner-frame');
-                            if (iframe) {
-                                try {
-                                    var innerDoc = iframe.contentDocument || iframe.contentWindow.document;
-                                    var restoreBtn = innerDoc.querySelector('.goog-te-button button');
-                                    if (restoreBtn) restoreBtn.click();
-                                } catch(e){}
-                            }
+                            // 3. Remove translate styling and classes
+                            try {
+                                document.documentElement.classList.remove('translated-ltr', 'translated-rtl');
+                                document.body.classList.remove('translated-ltr', 'translated-rtl');
+                                if (document.body.style.top === '40px' || document.body.style.top === '39px') {
+                                    document.body.style.top = '0px';
+                                }
+                                if (document.body.style.position === 'relative') {
+                                    document.body.style.position = '';
+                                }
+                            } catch(e){}
 
                             if (window.AndroidTtsBridge && window.AndroidTtsBridge.onTranslationStatus) {
                                 window.AndroidTtsBridge.onTranslationStatus('original', '');

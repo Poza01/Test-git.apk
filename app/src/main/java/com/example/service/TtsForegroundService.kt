@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.graphics.BitmapFactory
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
@@ -17,7 +18,9 @@ import android.speech.tts.UtteranceProgressListener
 import android.speech.tts.Voice
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.media.app.NotificationCompat.MediaStyle
 import com.example.MainActivity
+import com.example.R
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -394,11 +397,13 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
 
     private fun buildNotification(): Notification {
         val state = _playbackState.value
-        val title = state.chapterTitle.ifBlank { "NovelAI TTS Reader" }
+        val title = state.chapterTitle.ifBlank { "เครื่องเล่นเสียงนิยาย" }
         val paraInfo = if (state.totalParagraphs > 0 && state.activeParagraphIndex >= 0) {
-            "ย่อหน้าที่ ${state.activeParagraphIndex + 1}/${state.totalParagraphs}"
+            "ย่อหน้าที่ ${state.activeParagraphIndex + 1} จาก ${state.totalParagraphs}"
+        } else if (state.currentText.isNotBlank()) {
+            state.currentText.take(60)
         } else {
-            "พร้อมอ่านออกเสียงเบื้องหลัง"
+            "พร้อมอ่านเสียงภาษาไทยเบื้องหลัง"
         }
 
         val contentIntent = Intent(this, MainActivity::class.java).apply {
@@ -429,26 +434,37 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
         val stopIntent = Intent(this, TtsForegroundService::class.java).apply { action = ACTION_STOP }
         val pendingStop = PendingIntent.getService(this, 4, stopIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
-        val playPauseIcon = if (state.isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
-        val playPauseText = if (state.isPlaying) "พัก" else "เล่น"
+        val playPauseIcon = if (state.isPlaying) R.drawable.ic_notif_pause else R.drawable.ic_notif_play
+        val playPauseText = if (state.isPlaying) "พักเสียง" else "เล่นต่อ"
+
+        val coverBitmap = try {
+            BitmapFactory.decodeResource(resources, R.drawable.img_app_cover_1787456498575)
+        } catch (e: Exception) {
+            null
+        }
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(paraInfo)
-            .setSubText(if (state.isPlaying) "กำลังอ่านเสียงไทย" else "หยุดชั่วคราว")
-            .setSmallIcon(android.R.drawable.ic_lock_silent_mode_off)
+            .setSubText(if (state.isPlaying) "กำลังอ่านเสียง" else "พักชั่วคราว")
+            .setSmallIcon(R.drawable.ic_notif_play)
+            .setLargeIcon(coverBitmap)
             .setContentIntent(pendingContentIntent)
-            .setOngoing(state.isPlaying || state.isPaused)
+            .setOngoing(state.isPlaying)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setCategory(NotificationCompat.CATEGORY_SERVICE)
-            .addAction(android.R.drawable.ic_media_previous, "ย้อนกลับ", pendingPrev)
+            .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
+            .setColor(0xFFF59E0B.toInt())
+            .setColorized(true)
+            .addAction(R.drawable.ic_notif_prev, "ย้อนกลับ", pendingPrev)
             .addAction(playPauseIcon, playPauseText, pendingPlayPause)
-            .addAction(android.R.drawable.ic_media_next, "ถัดไป", pendingNext)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "ปิด", pendingStop)
+            .addAction(R.drawable.ic_notif_next, "ถัดไป", pendingNext)
+            .addAction(R.drawable.ic_notif_stop, "ปิด", pendingStop)
             .setStyle(
-                NotificationCompat.BigTextStyle()
-                    .bigText(if (state.currentText.isNotBlank()) "${state.currentText}\n($paraInfo)" else paraInfo)
+                MediaStyle()
+                    .setShowActionsInCompactView(0, 1, 2)
+                    .setShowCancelButton(true)
+                    .setCancelButtonIntent(pendingStop)
             )
             .build()
     }

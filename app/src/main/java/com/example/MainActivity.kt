@@ -13,6 +13,11 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -119,15 +124,22 @@ fun MainAppContainer(
     service: TtsForegroundService?
 ) {
     var currentScreen by remember { mutableStateOf(AppScreen.WEB_READER) }
+    var isBottomNavVisible by remember { mutableStateOf(false) }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = Color(0xFF0F0F0F),
         bottomBar = {
-            AppBottomNav(
-                currentScreen = currentScreen,
-                onScreenSelected = { currentScreen = it }
-            )
+            AnimatedVisibility(
+                visible = isBottomNavVisible,
+                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+            ) {
+                AppBottomNav(
+                    currentScreen = currentScreen,
+                    onScreenSelected = { currentScreen = it }
+                )
+            }
         }
     ) { innerPadding ->
         Box(
@@ -151,6 +163,8 @@ fun MainAppContainer(
             ) {
                 WebCompanionScreen(
                     service = service,
+                    isBottomNavVisible = isBottomNavVisible,
+                    onToggleBottomNav = { isBottomNavVisible = !isBottomNavVisible },
                     onNavigateToBackgroundSettings = { currentScreen = AppScreen.BACKGROUND_SETTINGS }
                 )
             }

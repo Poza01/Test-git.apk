@@ -34,6 +34,7 @@ okhttp = "4.10.0"
 moshiKotlin = "1.15.2"
 moshiKotlinCodegen = "1.15.2"
 datastorePreferences = "1.1.7"
+media = "1.7.0"
 robolectric = "4.16.1"
 roborazzi = "1.59.0"
 firebaseBom = "34.17.0"
@@ -44,6 +45,7 @@ googleid = "1.1.1"
 
 
 [libraries]
+androidx-media = { group = "androidx.media", name = "media", version.ref = "media" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }
