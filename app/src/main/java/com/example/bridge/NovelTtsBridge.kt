@@ -47,36 +47,10 @@ class NovelTtsBridge(
         mainHandler.post {
             getWebView()?.evaluateJavascript("""
                 (function() {
-                    // Try direct next button or novel readers custom handlers
-                    if (typeof window.__novel_next_chapter === 'function') {
-                        try { window.__novel_next_chapter(); return 'custom_handler'; } catch(e){}
+                    if (window.__android_tts_next && typeof window.__android_tts_next === 'function') {
+                        return window.__android_tts_next();
                     }
-
-                    const selectors = [
-                        '#next_url', '.next_page', '#next-chapter', '.next-chapter', '.btn-next',
-                        'a[rel="next"]', 'button.next', 'a.next', 'a.nextChapter', '.chapter-next a',
-                        '#nextLink', '.nav-next a', 'a:has(.fa-chevron-right)', 'a:has(.fa-arrow-right)'
-                    ];
-                    for (let s of selectors) {
-                        let el = document.querySelector(s);
-                        if (el && el.offsetParent !== null) { el.click(); return 'clicked_' + s; }
-                    }
-                    for (let s of selectors) {
-                        let el = document.querySelector(s);
-                        if (el) { el.click(); return 'clicked_fallback_' + s; }
-                    }
-
-                    const xpathList = [
-                        "//a[contains(text(), 'ตอนต่อไป') or contains(text(), 'บทถัดไป') or contains(text(), 'ถัดไป') or contains(text(), 'ตอนหน้า')]",
-                        "//a[contains(text(), '下一章') or contains(text(), '下一页') or contains(text(), 'Next Chapter') or contains(text(), 'Next')]",
-                        "//button[contains(text(), 'ตอนต่อไป') or contains(text(), 'บทถัดไป') or contains(text(), 'ถัดไป') or contains(text(), 'Next')]"
-                    ];
-                    for (let xp of xpathList) {
-                        let res = document.evaluate(xp, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-                        if (res) { res.click(); return 'clicked_xpath'; }
-                    }
-                    window.scrollBy({ top: window.innerHeight * 0.75, behavior: 'smooth' });
-                    return 'scrolled';
+                    return false;
                 })();
             """.trimIndent(), null)
         }
@@ -86,35 +60,10 @@ class NovelTtsBridge(
         mainHandler.post {
             getWebView()?.evaluateJavascript("""
                 (function() {
-                    if (typeof window.__novel_prev_chapter === 'function') {
-                        try { window.__novel_prev_chapter(); return 'custom_handler'; } catch(e){}
+                    if (window.__android_tts_prev && typeof window.__android_tts_prev === 'function') {
+                        return window.__android_tts_prev();
                     }
-
-                    const selectors = [
-                        '#prev_url', '.prev_page', '#prev-chapter', '.prev-chapter', '.btn-prev',
-                        'a[rel="prev"]', 'button.prev', 'a.prev', 'a.prevChapter', '.chapter-prev a',
-                        '#prevLink', '.nav-prev a'
-                    ];
-                    for (let s of selectors) {
-                        let el = document.querySelector(s);
-                        if (el && el.offsetParent !== null) { el.click(); return 'clicked_' + s; }
-                    }
-                    for (let s of selectors) {
-                        let el = document.querySelector(s);
-                        if (el) { el.click(); return 'clicked_fallback_' + s; }
-                    }
-
-                    const xpathList = [
-                        "//a[contains(text(), 'ตอนก่อนหน้า') or contains(text(), 'บทก่อนหน้า') or contains(text(), 'ก่อนหน้า')]",
-                        "//a[contains(text(), '上一章') or contains(text(), '上一页') or contains(text(), 'Previous Chapter') or contains(text(), 'Prev')]",
-                        "//button[contains(text(), 'ตอนก่อนหน้า') or contains(text(), 'บทก่อนหน้า') or contains(text(), 'ก่อนหน้า') or contains(text(), 'Prev')]"
-                    ];
-                    for (let xp of xpathList) {
-                        let res = document.evaluate(xp, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-                        if (res) { res.click(); return 'clicked_xpath'; }
-                    }
-                    window.scrollBy({ top: -window.innerHeight * 0.75, behavior: 'smooth' });
-                    return 'scrolled';
+                    return false;
                 })();
             """.trimIndent(), null)
         }
@@ -124,18 +73,10 @@ class NovelTtsBridge(
         mainHandler.post {
             getWebView()?.evaluateJavascript("""
                 (function() {
-                    if (window.speechSynthesis) {
-                        window.speechSynthesis.paused = false;
-                        window.speechSynthesis.speaking = true;
+                    if (window.__android_tts_resume && typeof window.__android_tts_resume === 'function') {
+                        return window.__android_tts_resume();
                     }
-                    if (window.__android_active_utterance_id) {
-                        var utt = (window.__android_tts_utterances || {})[window.__android_active_utterance_id];
-                        if (utt && typeof utt.onresume === 'function') {
-                            utt.onresume({ type: 'resume', utterance: utt });
-                        }
-                    }
-                    const playBtn = document.querySelector('.tts-play, .btn-play, [data-action="play"], #play-button, .reader-play, .audio-play');
-                    if (playBtn) { playBtn.click(); }
+                    return false;
                 })();
             """.trimIndent(), null)
         }
@@ -145,20 +86,41 @@ class NovelTtsBridge(
         mainHandler.post {
             getWebView()?.evaluateJavascript("""
                 (function() {
-                    if (window.speechSynthesis) {
-                        window.speechSynthesis.paused = true;
-                        window.speechSynthesis.speaking = false;
+                    if (window.__android_tts_pause && typeof window.__android_tts_pause === 'function') {
+                        return window.__android_tts_pause();
                     }
-                    if (window.__android_active_utterance_id) {
-                        var utt = (window.__android_tts_utterances || {})[window.__android_active_utterance_id];
-                        if (utt && typeof utt.onpause === 'function') {
-                            utt.onpause({ type: 'pause', utterance: utt });
-                        }
-                    }
-                    const pauseBtn = document.querySelector('.tts-pause, .btn-pause, [data-action="pause"], #pause-button, .reader-pause, .audio-pause');
-                    if (pauseBtn) { pauseBtn.click(); }
+                    return false;
                 })();
             """.trimIndent(), null)
+        }
+    }
+
+    @JavascriptInterface
+    fun onWebAudioStarted(title: String?, text: String?, engineName: String?) {
+        mainHandler.post {
+            attachServiceListener()
+            val service = getService() ?: TtsForegroundService.instance
+            service?.onWebAudioStarted(
+                title ?: "กำลังอ่านนิยาย",
+                text ?: "",
+                engineName ?: "Google / Microsoft TTS"
+            )
+        }
+    }
+
+    @JavascriptInterface
+    fun onWebAudioPaused() {
+        mainHandler.post {
+            val service = getService() ?: TtsForegroundService.instance
+            service?.onWebAudioPaused()
+        }
+    }
+
+    @JavascriptInterface
+    fun onWebAudioEnded() {
+        mainHandler.post {
+            val service = getService() ?: TtsForegroundService.instance
+            service?.onWebAudioEnded()
         }
     }
 
@@ -214,12 +176,27 @@ class NovelTtsBridge(
                 (function() {
                     try {
                         if (typeof window.__chrome_translate_restore === 'function') {
-                            window.__chrome_translate_restore();
+                            return window.__chrome_translate_restore();
                         }
                     } catch(e){}
+                    return false;
                 })();
             """.trimIndent()
-            wv?.evaluateJavascript(js, null)
+            wv?.evaluateJavascript(js) { result ->
+                val restored = result?.trim()?.removeSurrounding("\"")?.toBooleanStrictOrNull() == true
+                if (!restored) {
+                    // If in-place restore could not find cached snapshot, fallback to reload while preserving scroll
+                    wv.evaluateJavascript("""
+                        (function() {
+                            try {
+                                sessionStorage.setItem('__novel_saved_scroll', window.scrollY || 0);
+                            } catch(e){}
+                        })();
+                    """.trimIndent()) {
+                        wv.reload()
+                    }
+                }
+            }
         }
     }
 
@@ -510,6 +487,16 @@ class NovelTtsBridge(
                                     if (typeof utt.onend === 'function') {
                                         utt.onend({ type: 'end', utterance: utt });
                                     }
+                                } else if (window.__android_active_utterance_id) {
+                                    var activeId = window.__android_active_utterance_id;
+                                    var activeUtt = window.__android_tts_utterances[activeId];
+                                    if (activeUtt) {
+                                        delete window.__android_tts_utterances[activeId];
+                                        window.__android_active_utterance_id = null;
+                                        if (typeof activeUtt.onend === 'function') {
+                                            activeUtt.onend({ type: 'end', utterance: activeUtt });
+                                        }
+                                    }
                                 }
                             } else if (event === 'onerror') {
                                 if (window.speechSynthesis) {
@@ -554,6 +541,7 @@ class NovelTtsBridge(
 
                                 const id = "utt_" + (++uttCounter);
                                 window.__android_tts_utterances[id] = utterance;
+                                window.__android_active_utterance_id = id;
 
                                 if (utterance.rate && utterance.rate !== 1.0 && window.AndroidTtsBridge && window.AndroidTtsBridge.setRate) {
                                     window.AndroidTtsBridge.setRate(utterance.rate);
@@ -578,6 +566,7 @@ class NovelTtsBridge(
                         cancel: function() {
                             try {
                                 window.__android_tts_utterances = {};
+                                window.__android_active_utterance_id = null;
                                 synth.speaking = false;
                                 synth.paused = false;
                                 if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.stop === 'function') {
@@ -629,7 +618,281 @@ class NovelTtsBridge(
                     setTimeout(triggerVoicesChanged, 50);
                     setTimeout(triggerVoicesChanged, 300);
 
-                    // 5. Expose convenient novel reader helper functions
+                    // 5. HTML5 Audio & Online TTS Engines (Google / Microsoft) Interception & Tracking
+                    function getAudioEngineName(audio) {
+                        try {
+                            const src = (audio && audio.src) ? audio.src.toLowerCase() : '';
+                            if (src.includes('google') || src.includes('translate_tts')) return 'Google TTS';
+                            if (src.includes('microsoft') || src.includes('edge') || src.includes('azure') || src.includes('speech.platform')) return 'Microsoft TTS';
+                            const activeEngineEl = document.querySelector('.engine-select .active, [data-engine].active, #tts-engine option:checked, select[name*="engine"] option:checked, .voice-engine .selected, .tts-type .active');
+                            if (activeEngineEl) {
+                                const txt = (activeEngineEl.textContent || activeEngineEl.value || '').trim();
+                                if (txt) return txt;
+                            }
+                        } catch(e) {}
+                        return 'Google / Microsoft TTS';
+                    }
+
+                    function getNovelReadingText() {
+                        try {
+                            const activePara = document.querySelector('.reading, .tts-reading, .active-sentence, .highlight-reading, .highlight, [data-reading="true"], .current-read, .reading-active');
+                            if (activePara) {
+                                const t = (activePara.innerText || activePara.textContent || '').trim();
+                                if (t) return t.substring(0, 100);
+                            }
+                            if (navigator.mediaSession && navigator.mediaSession.metadata && navigator.mediaSession.metadata.title) {
+                                return navigator.mediaSession.metadata.title;
+                            }
+                        } catch(e) {}
+                        return (document.title || 'อ่านนิยาย').substring(0, 80);
+                    }
+
+                    function notifyAudioPlaying(audio) {
+                        try {
+                            window.__active_html5_audio = audio;
+                            const engine = getAudioEngineName(audio);
+                            const title = (document.querySelector('h1, .chapter-title, #chapter-title, .title') || {}).innerText || document.title || "อ่านนิยายเว็บ";
+                            const text = getNovelReadingText();
+                            if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.onWebAudioStarted === 'function') {
+                                window.AndroidTtsBridge.onWebAudioStarted(title.trim(), text, engine);
+                            }
+                        } catch(e) {}
+                    }
+
+                    function notifyAudioPaused(audio) {
+                        try {
+                            if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.onWebAudioPaused === 'function') {
+                                window.AndroidTtsBridge.onWebAudioPaused();
+                            }
+                        } catch(e) {}
+                    }
+
+                    function notifyAudioEnded() {
+                        try {
+                            if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.onWebAudioEnded === 'function') {
+                                window.AndroidTtsBridge.onWebAudioEnded();
+                            }
+                        } catch(e) {}
+                    }
+
+                    function hookAudioInstance(audio) {
+                        if (!audio || audio.__novel_monitored) return;
+                        audio.__novel_monitored = true;
+                        audio.addEventListener('play', () => notifyAudioPlaying(audio));
+                        audio.addEventListener('playing', () => notifyAudioPlaying(audio));
+                        audio.addEventListener('pause', () => notifyAudioPaused(audio));
+                        audio.addEventListener('ended', notifyAudioEnded);
+                        audio.addEventListener('error', notifyAudioEnded);
+                    }
+
+                    try {
+                        const origPlay = HTMLAudioElement.prototype.play;
+                        HTMLAudioElement.prototype.play = function() {
+                            hookAudioInstance(this);
+                            notifyAudioPlaying(this);
+                            return origPlay.apply(this, arguments);
+                        };
+                        const origPause = HTMLAudioElement.prototype.pause;
+                        HTMLAudioElement.prototype.pause = function() {
+                            notifyAudioPaused(this);
+                            return origPause.apply(this, arguments);
+                        };
+                    } catch(e) {}
+
+                    try {
+                        const OrigAudio = window.Audio;
+                        window.Audio = function(src) {
+                            const inst = new OrigAudio(src);
+                            hookAudioInstance(inst);
+                            return inst;
+                        };
+                        window.Audio.prototype = OrigAudio.prototype;
+                    } catch(e) {}
+
+                    window.__mediaSessionHandlers = window.__mediaSessionHandlers || {};
+                    try {
+                        if (navigator.mediaSession) {
+                            const origSetActionHandler = navigator.mediaSession.setActionHandler.bind(navigator.mediaSession);
+                            navigator.mediaSession.setActionHandler = function(action, handler) {
+                                window.__mediaSessionHandlers[action] = handler;
+                                return origSetActionHandler(action, handler);
+                            };
+                        }
+                    } catch(e) {}
+
+                    try {
+                        document.querySelectorAll('audio').forEach(hookAudioInstance);
+                        const audObs = new MutationObserver(() => {
+                            document.querySelectorAll('audio').forEach(hookAudioInstance);
+                        });
+                        audObs.observe(document.documentElement || document.body, { childList: true, subtree: true });
+                    } catch(e) {}
+
+                    // 6. Unified Notification Control Actions for all engines (Device, Google, Microsoft)
+                    window.__android_tts_resume = function() {
+                        try {
+                            if (window.__mediaSessionHandlers && typeof window.__mediaSessionHandlers['play'] === 'function') {
+                                try { window.__mediaSessionHandlers['play'](); } catch(e){}
+                            }
+                            if (window.__active_html5_audio && window.__active_html5_audio.paused) {
+                                window.__active_html5_audio.play().catch(() => {});
+                            }
+                            document.querySelectorAll('audio').forEach(a => {
+                                if (a.paused && a.src) a.play().catch(() => {});
+                            });
+                            if (window.speechSynthesis) {
+                                window.speechSynthesis.paused = false;
+                                window.speechSynthesis.speaking = true;
+                            }
+                            if (window.__android_active_utterance_id) {
+                                const utt = (window.__android_tts_utterances || {})[window.__android_active_utterance_id];
+                                if (utt && typeof utt.onresume === 'function') {
+                                    utt.onresume({ type: 'resume', utterance: utt });
+                                }
+                            }
+                            const playBtn = document.querySelector('.tts-play, .btn-play, [data-action="play"], #play-button, .reader-play, .audio-play, .play-btn, .btn-read-play, [aria-label*="Play"], [title*="เล่น"], [title*="Play"], .fa-play');
+                            if (playBtn) { playBtn.click(); }
+                            return true;
+                        } catch(e) {
+                            console.error("Resume error", e);
+                            return false;
+                        }
+                    };
+
+                    window.__android_tts_pause = function() {
+                        try {
+                            if (window.__mediaSessionHandlers && typeof window.__mediaSessionHandlers['pause'] === 'function') {
+                                try { window.__mediaSessionHandlers['pause'](); } catch(e){}
+                            }
+                            if (window.__active_html5_audio && !window.__active_html5_audio.paused) {
+                                window.__active_html5_audio.pause();
+                            }
+                            document.querySelectorAll('audio').forEach(a => {
+                                if (!a.paused) a.pause();
+                            });
+                            if (window.speechSynthesis) {
+                                window.speechSynthesis.paused = true;
+                                window.speechSynthesis.speaking = false;
+                            }
+                            if (window.__android_active_utterance_id) {
+                                const utt = (window.__android_tts_utterances || {})[window.__android_active_utterance_id];
+                                if (utt && typeof utt.onpause === 'function') {
+                                    utt.onpause({ type: 'pause', utterance: utt });
+                                }
+                            }
+                            const pauseBtn = document.querySelector('.tts-pause, .btn-pause, [data-action="pause"], #pause-button, .reader-pause, .audio-pause, .pause-btn, .btn-read-pause, [aria-label*="Pause"], [title*="หยุด"], [title*="Pause"], .fa-pause');
+                            if (pauseBtn) { pauseBtn.click(); }
+                            return true;
+                        } catch(e) {
+                            console.error("Pause error", e);
+                            return false;
+                        }
+                    };
+
+                    window.__android_tts_next = function() {
+                        try {
+                            if (window.__mediaSessionHandlers && typeof window.__mediaSessionHandlers['nexttrack'] === 'function') {
+                                try { window.__mediaSessionHandlers['nexttrack'](); return 'mediasession'; } catch(e){}
+                            }
+                            const nextParaSelectors = [
+                                '.tts-next', '.btn-next-para', '[data-action="next-para"]', '.reader-next',
+                                '.next-sentence', '.next-para', '[title*="ย่อหน้าถัดไป"]', '[title*="ประโยคถัดไป"]',
+                                '[aria-label*="Next paragraph"]', '[aria-label*="Next sentence"]', '.btn-next-sentence'
+                            ];
+                            for (let s of nextParaSelectors) {
+                                let el = document.querySelector(s);
+                                if (el) { el.click(); return 'clicked_next_para_' + s; }
+                            }
+                            if (window.__android_active_utterance_id) {
+                                const currUtt = (window.__android_tts_utterances || {})[window.__android_active_utterance_id];
+                                if (currUtt && typeof currUtt.onend === 'function') {
+                                    delete window.__android_tts_utterances[window.__android_active_utterance_id];
+                                    window.__android_active_utterance_id = null;
+                                    currUtt.onend({ type: 'end', utterance: currUtt });
+                                    return 'advanced_speech_utterance';
+                                }
+                            }
+                            if (typeof window.__novel_next_chapter === 'function') {
+                                try { window.__novel_next_chapter(); return 'custom_chapter'; } catch(e){}
+                            }
+                            const chapterSelectors = [
+                                '#next_url', '.next_page', '#next-chapter', '.next-chapter', '.btn-next',
+                                'a[rel="next"]', 'button.next', 'a.next', 'a.nextChapter', '.chapter-next a',
+                                '#nextLink', '.nav-next a', 'a:has(.fa-chevron-right)', 'a:has(.fa-arrow-right)'
+                            ];
+                            for (let cs of chapterSelectors) {
+                                let cEl = document.querySelector(cs);
+                                if (cEl && cEl.offsetParent !== null) { cEl.click(); return 'clicked_chapter_' + cs; }
+                            }
+                            for (let cs of chapterSelectors) {
+                                let cEl = document.querySelector(cs);
+                                if (cEl) { cEl.click(); return 'clicked_chapter_' + cs; }
+                            }
+                            const xpathList = [
+                                "//a[contains(text(), 'ตอนต่อไป') or contains(text(), 'บทถัดไป') or contains(text(), 'ถัดไป') or contains(text(), 'ตอนหน้า')]",
+                                "//a[contains(text(), '下一章') or contains(text(), '下一页') or contains(text(), 'Next Chapter') or contains(text(), 'Next')]",
+                                "//button[contains(text(), 'ตอนต่อไป') or contains(text(), 'บทถัดไป') or contains(text(), 'ถัดไป') or contains(text(), 'Next')]"
+                            ];
+                            for (let xp of xpathList) {
+                                let res = document.evaluate(xp, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                                if (res) { res.click(); return 'clicked_xpath'; }
+                            }
+                            window.scrollBy({ top: window.innerHeight * 0.75, behavior: 'smooth' });
+                            return 'scrolled';
+                        } catch(e) {
+                            console.error("Next error", e);
+                            return false;
+                        }
+                    };
+
+                    window.__android_tts_prev = function() {
+                        try {
+                            if (window.__mediaSessionHandlers && typeof window.__mediaSessionHandlers['previoustrack'] === 'function') {
+                                try { window.__mediaSessionHandlers['previoustrack'](); return 'mediasession'; } catch(e){}
+                            }
+                            const prevParaSelectors = [
+                                '.tts-prev', '.btn-prev-para', '[data-action="prev-para"]', '.reader-prev',
+                                '.prev-sentence', '.prev-para', '[title*="ย่อหน้าก่อนหน้า"]', '[title*="ประโยคก่อนหน้า"]',
+                                '[aria-label*="Previous paragraph"]', '[aria-label*="Previous sentence"]', '.btn-prev-sentence'
+                            ];
+                            for (let s of prevParaSelectors) {
+                                let el = document.querySelector(s);
+                                if (el) { el.click(); return 'clicked_prev_para_' + s; }
+                            }
+                            if (typeof window.__novel_prev_chapter === 'function') {
+                                try { window.__novel_prev_chapter(); return 'custom_chapter'; } catch(e){}
+                            }
+                            const chapterSelectors = [
+                                '#prev_url', '.prev_page', '#prev-chapter', '.prev-chapter', '.btn-prev',
+                                'a[rel="prev"]', 'button.prev', 'a.prev', 'a.prevChapter', '.chapter-prev a',
+                                '#prevLink', '.nav-prev a'
+                            ];
+                            for (let cs of chapterSelectors) {
+                                let cEl = document.querySelector(cs);
+                                if (cEl && cEl.offsetParent !== null) { cEl.click(); return 'clicked_chapter_' + cs; }
+                            }
+                            for (let cs of chapterSelectors) {
+                                let cEl = document.querySelector(cs);
+                                if (cEl) { cEl.click(); return 'clicked_chapter_' + cs; }
+                            }
+                            const xpathList = [
+                                "//a[contains(text(), 'ตอนก่อนหน้า') or contains(text(), 'บทก่อนหน้า') or contains(text(), 'ก่อนหน้า')]",
+                                "//a[contains(text(), '上一章') or contains(text(), '上一页') or contains(text(), 'Previous Chapter') or contains(text(), 'Prev')]",
+                                "//button[contains(text(), 'ตอนก่อนหน้า') or contains(text(), 'บทก่อนหน้า') or contains(text(), 'ก่อนหน้า') or contains(text(), 'Prev')]"
+                            ];
+                            for (let xp of xpathList) {
+                                let res = document.evaluate(xp, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                                if (res) { res.click(); return 'clicked_xpath'; }
+                            }
+                            window.scrollBy({ top: -window.innerHeight * 0.75, behavior: 'smooth' });
+                            return 'scrolled';
+                        } catch(e) {
+                            console.error("Prev error", e);
+                            return false;
+                        }
+                    };
+
+                    // 7. Expose convenient novel reader helper functions
                     window.readWithAndroidTts = function(text, title) {
                         if (window.AndroidTtsBridge) {
                             window.AndroidTtsBridge.speak(text, title || document.title);
@@ -740,6 +1003,20 @@ class NovelTtsBridge(
                         }
                     }
 
+                    // Snapshot pristine original page state
+                    function captureOriginalSnapshot() {
+                        try {
+                            if (!window.__original_html_snapshot || window.__snapshot_url !== location.href) {
+                                if (document.body && document.body.innerHTML && document.body.innerHTML.length > 50 &&
+                                    !document.documentElement.classList.contains('translated-ltr') &&
+                                    !document.documentElement.classList.contains('translated-rtl')) {
+                                    window.__original_html_snapshot = document.body.innerHTML;
+                                    window.__snapshot_url = location.href;
+                                }
+                            }
+                        } catch(e){}
+                    }
+
                     // 3. Init Google translate callback
                     window.googleTranslateElementInit = function() {
                         try {
@@ -753,7 +1030,7 @@ class NovelTtsBridge(
                         }
                     };
 
-                    // 4. Load Google Translate SDK on demand
+                    // 4. Load Google Translate SDK immediately in background
                     function loadGoogleTranslateScript() {
                         ensureTranslateElement();
                         if (!document.getElementById('google-translate-script')) {
@@ -770,6 +1047,8 @@ class NovelTtsBridge(
                     // 5. Trigger Translation
                     window.__chrome_translate_to = function(targetLang) {
                         try {
+                            targetLang = targetLang || 'th';
+                            captureOriginalSnapshot();
                             ensureTranslateElement();
                             loadGoogleTranslateScript();
 
@@ -782,26 +1061,47 @@ class NovelTtsBridge(
                                 window.AndroidTtsBridge.onTranslationStatus('translating', targetLang);
                             }
 
+                            // Set googtrans cookie immediately
+                            var host = location.hostname;
+                            document.cookie = "googtrans=/auto/" + targetLang + "; path=/;";
+                            document.cookie = "googtrans=/auto/" + targetLang + "; path=/; domain=" + host;
+                            document.cookie = "googtrans=/auto/" + targetLang + "; path=/; domain=." + host;
+
+                            function triggerSelect(select) {
+                                if (select) {
+                                    select.value = targetLang;
+                                    select.dispatchEvent(new Event('change', { bubbles: true }));
+                                    select.dispatchEvent(new Event('input', { bubbles: true }));
+                                    if (typeof select.onchange === 'function') {
+                                        select.onchange();
+                                    }
+                                }
+                            }
+
+                            var select = document.querySelector('.goog-te-combo');
+                            if (select) {
+                                triggerSelect(select);
+                                if (window.AndroidTtsBridge && window.AndroidTtsBridge.onTranslationStatus) {
+                                    window.AndroidTtsBridge.onTranslationStatus('translated', targetLang);
+                                }
+                                return;
+                            }
+
+                            // Keep checking up to 70 attempts (10.5 seconds) for the dropdown to render
                             var attempts = 0;
                             window.__chrome_translate_interval = setInterval(function() {
                                 attempts++;
-                                var select = document.querySelector('.goog-te-combo');
-                                if (select) {
+                                var sel = document.querySelector('.goog-te-combo');
+                                if (sel) {
                                     clearInterval(window.__chrome_translate_interval);
                                     window.__chrome_translate_interval = null;
-                                    if (select.value !== targetLang) {
-                                        select.value = targetLang;
-                                        select.dispatchEvent(new Event('change'));
-                                    }
+                                    triggerSelect(sel);
                                     if (window.AndroidTtsBridge && window.AndroidTtsBridge.onTranslationStatus) {
                                         window.AndroidTtsBridge.onTranslationStatus('translated', targetLang);
                                     }
-                                } else if (attempts > 20) {
+                                } else if (attempts >= 70) {
                                     clearInterval(window.__chrome_translate_interval);
                                     window.__chrome_translate_interval = null;
-                                    // Fallback: Cookie method
-                                    document.cookie = "googtrans=/auto/" + targetLang + "; path=/; domain=" + location.hostname;
-                                    document.cookie = "googtrans=/auto/" + targetLang + "; path=/;";
                                     if (window.AndroidTtsBridge && window.AndroidTtsBridge.onTranslationStatus) {
                                         window.AndroidTtsBridge.onTranslationStatus('translated', targetLang);
                                     }
@@ -815,13 +1115,15 @@ class NovelTtsBridge(
                         }
                     };
 
-                    // 6. Restore Original
+                    // 6. Restore Original (Zero-reload instantaneous DOM rollback)
                     window.__chrome_translate_restore = function() {
                         try {
                             if (window.__chrome_translate_interval) {
                                 clearInterval(window.__chrome_translate_interval);
                                 window.__chrome_translate_interval = null;
                             }
+
+                            // 1. Delete all googtrans cookies across all domains and paths
                             var host = location.hostname;
                             var domains = [host, '.' + host, ''];
                             var parts = host.split('.');
@@ -836,19 +1138,36 @@ class NovelTtsBridge(
                                 });
                             });
 
-                            // 1. Try restore button inside Google Translate banner iframes
-                            try {
-                                var iframes = document.querySelectorAll('iframe.goog-te-banner-frame, iframe[class*="goog-te"]');
-                                iframes.forEach(function(iframe) {
-                                    try {
-                                        var innerDoc = iframe.contentDocument || iframe.contentWindow.document;
-                                        var restoreBtn = innerDoc.querySelector('button[id*="restore"], .goog-te-button button, [id*="restore"]');
-                                        if (restoreBtn) restoreBtn.click();
-                                    } catch(err){}
-                                });
-                            } catch(e){}
+                            // 2. In-place instantaneous DOM restoration from pristine snapshot
+                            if (window.__original_html_snapshot && window.__snapshot_url === location.href) {
+                                var currentY = window.scrollY || window.pageYOffset || (document.documentElement ? document.documentElement.scrollTop : 0) || 0;
 
-                            // 2. Select original option in dropdown
+                                document.body.innerHTML = window.__original_html_snapshot;
+
+                                document.documentElement.classList.remove('translated-ltr', 'translated-rtl');
+                                document.body.classList.remove('translated-ltr', 'translated-rtl');
+                                document.body.style.top = '0px';
+                                document.body.style.position = '';
+
+                                window.scrollTo(0, currentY);
+                                setTimeout(function() {
+                                    window.scrollTo(0, currentY);
+                                }, 30);
+
+                                ensureTranslateElement();
+                                loadGoogleTranslateScript();
+
+                                if (window.__android_tts_sync_ready) {
+                                    window.__android_tts_sync_ready();
+                                }
+
+                                if (window.AndroidTtsBridge && window.AndroidTtsBridge.onTranslationStatus) {
+                                    window.AndroidTtsBridge.onTranslationStatus('original', '');
+                                }
+                                return true;
+                            }
+
+                            // 3. Fallback if snapshot wasn't available: reset combo and classes
                             var select = document.querySelector('.goog-te-combo');
                             if (select) {
                                 var origOption = select.querySelector('option[value=""]') || select.options[0];
@@ -857,29 +1176,22 @@ class NovelTtsBridge(
                                     select.dispatchEvent(new Event('change', { bubbles: true }));
                                 }
                             }
-
-                            // 3. Remove translate styling and classes
-                            try {
-                                document.documentElement.classList.remove('translated-ltr', 'translated-rtl');
-                                document.body.classList.remove('translated-ltr', 'translated-rtl');
-                                if (document.body.style.top === '40px' || document.body.style.top === '39px') {
-                                    document.body.style.top = '0px';
-                                }
-                                if (document.body.style.position === 'relative') {
-                                    document.body.style.position = '';
-                                }
-                            } catch(e){}
+                            document.documentElement.classList.remove('translated-ltr', 'translated-rtl');
+                            document.body.classList.remove('translated-ltr', 'translated-rtl');
 
                             if (window.AndroidTtsBridge && window.AndroidTtsBridge.onTranslationStatus) {
                                 window.AndroidTtsBridge.onTranslationStatus('original', '');
                             }
+                            return false;
                         } catch(e) {
                             console.error("Restore error", e);
+                            return false;
                         }
                     };
 
-                    // Only prepare environment, script loads when user presses Translate
-                    ensureTranslateElement();
+                    // Pre-capture original snapshot and preload Google Translate script in background
+                    captureOriginalSnapshot();
+                    loadGoogleTranslateScript();
                 } catch(err) {
                     console.error("Translate engine setup error", err);
                 }

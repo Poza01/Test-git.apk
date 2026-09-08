@@ -379,8 +379,14 @@ fun WebCompanionScreen(
                                 shape = RoundedCornerShape(12.dp)
                             )
                             .clickable {
-                                isTranslateBarVisible = !isTranslateBarVisible
-                                prefs.showTranslateBar = isTranslateBarVisible
+                                if (!isTranslated && !isTranslating) {
+                                    isTranslateBarVisible = true
+                                    prefs.showTranslateBar = true
+                                    bridge.translatePage(targetLang)
+                                } else {
+                                    isTranslateBarVisible = !isTranslateBarVisible
+                                    prefs.showTranslateBar = isTranslateBarVisible
+                                }
                             }
                             .padding(horizontal = 8.dp, vertical = 5.dp)
                             .testTag("toggle_translate_bar_button"),
@@ -395,7 +401,7 @@ fun WebCompanionScreen(
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = if (isTranslated) "แปลไทยแล้ว ✓" else "แปลภาษา",
+                                text = if (isTranslating) "กำลังแปล..." else if (isTranslated) "แปลไทยแล้ว ✓" else "แปลภาษา",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
                                 color = if (isTranslateBarVisible || isTranslated) Color.White else Color(0xFFD1D5DB),
@@ -611,6 +617,23 @@ fun WebCompanionScreen(
                                 view?.evaluateJavascript(NovelTtsBridge.INJECTION_SCRIPT, null)
                                 view?.evaluateJavascript(NovelTtsBridge.TRANSLATE_INJECTION_SCRIPT, null)
                                 view?.evaluateJavascript("if (window.__android_tts_sync_ready) window.__android_tts_sync_ready();", null)
+
+                                // Restore scroll position if page was reloaded as fallback
+                                view?.evaluateJavascript("""
+                                    (function() {
+                                        try {
+                                            var saved = sessionStorage.getItem('__novel_saved_scroll');
+                                            if (saved) {
+                                                sessionStorage.removeItem('__novel_saved_scroll');
+                                                var y = parseInt(saved, 10);
+                                                if (!isNaN(y) && y > 0) {
+                                                    window.scrollTo(0, y);
+                                                    setTimeout(function() { window.scrollTo(0, y); }, 150);
+                                                }
+                                            }
+                                        } catch(e){}
+                                    })();
+                                """.trimIndent(), null)
 
                                 // ONLY trigger translation if auto-translate is explicitly enabled
                                 if (prefs.isAutoTranslate) {

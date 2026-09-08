@@ -48,6 +48,9 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
 
     private var currentUtteranceId = 0L
     private var pendingSpeechAction: (() -> Unit)? = null
+    private var currentWebUtteranceId: String? = null
+    private var isWebAudioPlaying: Boolean = false
+    private var webIdleJob: kotlinx.coroutines.Job? = null
 
     var onUtteranceEvent: ((event: String, utteranceId: String) -> Unit)? = null
 
@@ -152,8 +155,14 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
                     }
                     if (utteranceId?.startsWith("web_utt_") == true) {
                         // Web-driven single utterance completed, wait for web reader's next call
-                        _playbackState.update { it.copy(isPlaying = false, isPaused = false) }
-                        updateForegroundNotification()
+                        webIdleJob?.cancel()
+                        webIdleJob = serviceScope.launch {
+                            kotlinx.coroutines.delay(2500L)
+                            if (_playbackState.value.isPlaying && !isWebAudioPlaying && tts?.isSpeaking != true) {
+                                _playbackState.update { it.copy(isPlaying = false, isPaused = false) }
+                                updateForegroundNotification()
+                            }
+                        }
                     } else {
                         handleParagraphCompleted()
                     }
@@ -167,6 +176,7 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
                         onUtteranceEvent?.invoke("onerror", utteranceId)
                     }
                     if (utteranceId?.startsWith("web_utt_") == true) {
+                        webIdleJob?.cancel()
                         _playbackState.update { it.copy(isPlaying = false, isPaused = false) }
                     } else {
                         handleParagraphCompleted()
@@ -236,6 +246,10 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
         val cleanText = text.trim()
         if (cleanText.isBlank()) return
 
+        webIdleJob?.cancel()
+        currentWebUtteranceId = webUtteranceId
+        isWebAudioPlaying = false
+
         if (!_playbackState.value.isInitialized || tts == null) {
             Log.d(TAG, "TTS not ready yet, queuing speakFromWeb")
             pendingSpeechAction = { speakFromWeb(text, title, webUtteranceId) }
@@ -247,7 +261,8 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
                 chapterTitle = title.ifBlank { "อ่านนิยายเว็บ" },
                 currentText = cleanText,
                 isPlaying = true,
-                isPaused = false
+                isPaused = false,
+                engineName = "เสียงในเครื่อง (Device TTS)"
             )
         }
 
@@ -255,6 +270,46 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
 
         val utteranceId = "web_utt_$webUtteranceId"
         tts?.speak(cleanText, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+    }
+
+    fun onWebAudioStarted(title: String, text: String, engineName: String) {
+        webIdleJob?.cancel()
+        isWebAudioPlaying = true
+        _playbackState.update {
+            it.copy(
+                isPlaying = true,
+                isPaused = false,
+                chapterTitle = title.ifBlank { "กำลังอ่านนิยาย" },
+                currentText = text.ifBlank { "กำลังเล่นเสียง..." },
+                engineName = engineName.ifBlank { "Google / Microsoft TTS" }
+            )
+        }
+        startAsForegroundService()
+        updateForegroundNotification()
+    }
+
+    fun onWebAudioPaused() {
+        webIdleJob?.cancel()
+        isWebAudioPlaying = false
+        _playbackState.update {
+            it.copy(
+                isPlaying = false,
+                isPaused = true
+            )
+        }
+        updateForegroundNotification()
+    }
+
+    fun onWebAudioEnded() {
+        webIdleJob?.cancel()
+        webIdleJob = serviceScope.launch {
+            kotlinx.coroutines.delay(2000L)
+            if (isWebAudioPlaying) {
+                isWebAudioPlaying = false
+                _playbackState.update { it.copy(isPlaying = false) }
+                updateForegroundNotification()
+            }
+        }
     }
 
     private fun speakParagraphInternal(index: Int) {
@@ -285,7 +340,10 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
     }
 
     fun pause() {
-        tts?.stop()
+        webIdleJob?.cancel()
+        if (tts?.isSpeaking == true) {
+            tts?.stop()
+        }
         _playbackState.update { it.copy(isPlaying = false, isPaused = true) }
         updateForegroundNotification()
         com.example.bridge.NovelTtsBridge.notifyPauseFromService()
@@ -293,21 +351,25 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
 
     fun resume() {
         val state = _playbackState.value
+        webIdleJob?.cancel()
+        startAsForegroundService()
+        _playbackState.update { it.copy(isPlaying = true, isPaused = false) }
+        updateForegroundNotification()
+
         if (state.activeParagraphIndex >= 0 && state.activeParagraphIndex < state.paragraphs.size) {
-            startAsForegroundService()
             speakParagraphInternal(state.activeParagraphIndex)
         } else if (state.paragraphs.isNotEmpty()) {
-            startAsForegroundService()
             speakParagraphInternal(0)
-        } else if (state.currentText.isNotBlank()) {
-            startAsForegroundService()
-            _playbackState.update { it.copy(isPlaying = true, isPaused = false) }
-            updateForegroundNotification()
-            currentUtteranceId++
-            val utteranceId = "web_utt_resume_$currentUtteranceId"
+        } else if (!currentWebUtteranceId.isNullOrBlank() && state.currentText.isNotBlank()) {
+            // Keep the exact same utterance ID so web reader's onend callback is triggered!
+            val uttId = currentWebUtteranceId ?: "0"
+            val utteranceId = "web_utt_$uttId"
             tts?.speak(state.currentText, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+            com.example.bridge.NovelTtsBridge.notifyPlayResumeFromService()
+        } else {
+            // Web Audio (Google / Microsoft)
+            com.example.bridge.NovelTtsBridge.notifyPlayResumeFromService()
         }
-        com.example.bridge.NovelTtsBridge.notifyPlayResumeFromService()
     }
 
     fun stop() {
