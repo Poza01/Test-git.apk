@@ -645,14 +645,14 @@ fun WebCompanionScreen(
                                     }, 600)
                                 }
 
-                                // Auto-continue reading next chapter ONLY if user triggered next chapter
+                                // Auto-continue reading next/prev chapter ONLY if user triggered navigation
                                 view?.postDelayed({
                                     view.evaluateJavascript("""
                                         (function() {
                                             try {
                                                 if (sessionStorage.getItem('__novel_auto_play_next') === 'true') {
                                                     sessionStorage.removeItem('__novel_auto_play_next');
-                                                    const autoPlayBtn = document.querySelector('.btn-read, .btn-play, #btn-tts, #read-novel, [data-action="auto-read"]');
+                                                    const autoPlayBtn = document.querySelector('.btn-read, .btn-play, #btn-tts, #read-novel, [data-action="auto-read"], .tts-play, #play-button, .reader-play, .audio-play, .play-btn, .btn-read-play, [aria-label*="Play"], [title*="เล่น"], [title*="Play"]');
                                                     if (autoPlayBtn && typeof autoPlayBtn.click === 'function') {
                                                         autoPlayBtn.click();
                                                     }

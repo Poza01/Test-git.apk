@@ -473,8 +473,9 @@ class NovelTtsBridge(
                         };
                     }
 
-                    // 3. Utterance Tracking Map for callbacks
+                    // 3. Utterance & Sentence History Tracking Map
                     window.__android_tts_utterances = window.__android_tts_utterances || {};
+                    window.__android_tts_history = window.__android_tts_history || [];
                     let uttCounter = 0;
 
                     // Global Android -> JS Event Dispatcher
@@ -548,6 +549,13 @@ class NovelTtsBridge(
                                 const id = "utt_" + (++uttCounter);
                                 window.__android_tts_utterances[id] = utterance;
                                 window.__android_active_utterance_id = id;
+
+                                // Keep history of up to 500 lines for infinite previous rewinds
+                                if (!window.__android_tts_history) window.__android_tts_history = [];
+                                window.__android_tts_history.push({ id: id, utterance: utterance, text: text });
+                                if (window.__android_tts_history.length > 500) {
+                                    window.__android_tts_history.shift();
+                                }
 
                                 if (utterance.rate && utterance.rate !== 1.0 && window.AndroidTtsBridge && window.AndroidTtsBridge.setRate) {
                                     window.AndroidTtsBridge.setRate(utterance.rate);
@@ -684,11 +692,19 @@ class NovelTtsBridge(
                                         if (!a.paused) anyPlaying = true;
                                     });
                                     if (anyPlaying) return;
-                                    if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.onWebAudioPaused === 'function') {
-                                        window.AndroidTtsBridge.onWebAudioPaused();
-                                    }
+                                    // Give 3.5s grace period between chunked audio clips
+                                    setTimeout(function() {
+                                        let stillPlaying = false;
+                                        document.querySelectorAll('audio').forEach(function(a) {
+                                            if (!a.paused) stillPlaying = true;
+                                        });
+                                        if (stillPlaying) return;
+                                        if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.onWebAudioPaused === 'function') {
+                                            window.AndroidTtsBridge.onWebAudioPaused();
+                                        }
+                                    }, 3500);
                                 } catch(e) {}
-                            }, 300);
+                            }, 500);
                         } catch(e) {}
                     }
 
@@ -703,11 +719,19 @@ class NovelTtsBridge(
                                         if (!a.paused) anyPlaying = true;
                                     });
                                     if (anyPlaying) return;
-                                    if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.onWebAudioEnded === 'function') {
-                                        window.AndroidTtsBridge.onWebAudioEnded();
-                                    }
+                                    // Grace period of 4.5s for online TTS to load next chunk/sentence
+                                    setTimeout(function() {
+                                        let stillPlaying = false;
+                                        document.querySelectorAll('audio').forEach(function(a) {
+                                            if (!a.paused) stillPlaying = true;
+                                        });
+                                        if (stillPlaying) return;
+                                        if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.onWebAudioEnded === 'function') {
+                                            window.AndroidTtsBridge.onWebAudioEnded();
+                                        }
+                                    }, 4500);
                                 } catch(e) {}
-                            }, 1000);
+                            }, 500);
                         } catch(e) {}
                     }
 
@@ -866,25 +890,77 @@ class NovelTtsBridge(
 
                     window.__android_tts_prev = function() {
                         try {
+                            try { sessionStorage.setItem('__novel_auto_play_next', 'true'); } catch(e){}
                             if (window.__mediaSessionHandlers && typeof window.__mediaSessionHandlers['previoustrack'] === 'function') {
                                 try { window.__mediaSessionHandlers['previoustrack'](); return 'mediasession'; } catch(e){}
                             }
+
+                            // 1. If playing HTML5 Audio, rewind 10s or restart current audio if > 3s
+                            if (window.__active_html5_audio) {
+                                try {
+                                    if (window.__active_html5_audio.currentTime > 3) {
+                                        window.__active_html5_audio.currentTime = Math.max(0, window.__active_html5_audio.currentTime - 10);
+                                        return 'rewound_audio';
+                                    }
+                                } catch(e){}
+                            }
+
+                            // 2. Click previous paragraph/sentence controls on web novel readers
                             const prevParaSelectors = [
                                 '.tts-prev', '.btn-prev-para', '[data-action="prev-para"]', '.reader-prev',
                                 '.prev-sentence', '.prev-para', '[title*="ย่อหน้าก่อนหน้า"]', '[title*="ประโยคก่อนหน้า"]',
-                                '[aria-label*="Previous paragraph"]', '[aria-label*="Previous sentence"]', '.btn-prev-sentence'
+                                '[aria-label*="Previous paragraph"]', '[aria-label*="Previous sentence"]', '.btn-prev-sentence',
+                                '.btn-prev-speech', '#btn-prev-tts', '.tts-backward', '[data-action="prev-sentence"]',
+                                '.btn-prev-line', '#prev-sentence-btn', '.audio-prev', '.fa-step-backward'
                             ];
                             for (let s of prevParaSelectors) {
                                 let el = document.querySelector(s);
                                 if (el) { el.click(); return 'clicked_prev_para_' + s; }
                             }
+
+                            // 3. Move active highlight to previous sentence/paragraph in web reader and trigger its click/read
+                            const activeSentenceSelectors = [
+                                '.reading', '.tts-reading', '.active-sentence', '.highlight-reading',
+                                '.highlight', '[data-reading="true"]', '.current-read', '.reading-active',
+                                '.active-para', '.speech-highlight', '.speaking', '.tts-active'
+                            ];
+                            let currentReadingEl = null;
+                            for (let sel of activeSentenceSelectors) {
+                                currentReadingEl = document.querySelector(sel);
+                                if (currentReadingEl) break;
+                            }
+
+                            if (currentReadingEl) {
+                                let prevEl = currentReadingEl.previousElementSibling;
+                                while (prevEl && prevEl.tagName !== 'P' && prevEl.tagName !== 'DIV' && prevEl.tagName !== 'SPAN' && !prevEl.classList.contains('sentence')) {
+                                    prevEl = prevEl.previousElementSibling;
+                                }
+                                if (!prevEl && currentReadingEl.parentElement) {
+                                    let parentPrev = currentReadingEl.parentElement.previousElementSibling;
+                                    if (parentPrev) {
+                                        prevEl = parentPrev.querySelector('p, .sentence, span') || parentPrev;
+                                    }
+                                }
+                                if (prevEl) {
+                                    if (window.speechSynthesis) window.speechSynthesis.cancel();
+                                    prevEl.click();
+                                    prevEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                    return 'clicked_prev_dom_element';
+                                }
+                            }
+
+                            // 4. Custom chapter hook
                             if (typeof window.__novel_prev_chapter === 'function') {
                                 try { window.__novel_prev_chapter(); return 'custom_chapter'; } catch(e){}
                             }
+
+                            // 5. Click previous chapter link / button
                             const chapterSelectors = [
                                 '#prev_url', '.prev_page', '#prev-chapter', '.prev-chapter', '.btn-prev',
                                 'a[rel="prev"]', 'button.prev', 'a.prev', 'a.prevChapter', '.chapter-prev a',
-                                '#prevLink', '.nav-prev a'
+                                '#prevLink', '.nav-prev a', '#btn-prev-chapter', '.btn-prev-chap', '.read-prev',
+                                'a:has(.fa-chevron-left)', 'a:has(.fa-arrow-left)', 'a:has(.fa-angle-left)',
+                                '.nav-previous a', '.previous-chapter a', '.chapter-nav-prev'
                             ];
                             for (let cs of chapterSelectors) {
                                 let cEl = document.querySelector(cs);
@@ -894,10 +970,12 @@ class NovelTtsBridge(
                                 let cEl = document.querySelector(cs);
                                 if (cEl) { cEl.click(); return 'clicked_chapter_' + cs; }
                             }
+
+                            // 6. XPath fallback for Thai / English previous chapter buttons
                             const xpathList = [
-                                "//a[contains(text(), 'ตอนก่อนหน้า') or contains(text(), 'บทก่อนหน้า') or contains(text(), 'ก่อนหน้า')]",
+                                "//a[contains(text(), 'ตอนก่อนหน้า') or contains(text(), 'บทก่อนหน้า') or contains(text(), 'ก่อนหน้า') or contains(text(), 'ตอนที่แล้ว')]",
                                 "//a[contains(text(), '上一章') or contains(text(), '上一页') or contains(text(), 'Previous Chapter') or contains(text(), 'Prev')]",
-                                "//button[contains(text(), 'ตอนก่อนหน้า') or contains(text(), 'บทก่อนหน้า') or contains(text(), 'ก่อนหน้า') or contains(text(), 'Prev')]"
+                                "//button[contains(text(), 'ตอนก่อนหน้า') or contains(text(), 'บทก่อนหน้า') or contains(text(), 'ก่อนหน้า') or contains(text(), 'ตอนที่แล้ว') or contains(text(), 'Prev')]"
                             ];
                             for (let xp of xpathList) {
                                 let res = document.evaluate(xp, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;

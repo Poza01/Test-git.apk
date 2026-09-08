@@ -154,12 +154,13 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
                         onUtteranceEvent?.invoke("ondone", utteranceId)
                     }
                     if (utteranceId?.startsWith("web_utt_") == true) {
-                        // Web-driven single utterance completed
+                        // Web-driven single utterance completed - keep isPlaying true while reading session is active
                         val expectedId = "web_utt_$currentWebUtteranceId"
                         if (utteranceId == expectedId) {
                             webIdleJob?.cancel()
                             webIdleJob = serviceScope.launch {
-                                kotlinx.coroutines.delay(2500L)
+                                // Wait 8 seconds of continuous silence before marking as idle/stopped
+                                kotlinx.coroutines.delay(8000L)
                                 if (_playbackState.value.isPlaying && !isWebAudioPlaying && tts?.isSpeaking != true) {
                                     _playbackState.update { it.copy(isPlaying = false, isPaused = false) }
                                     updateForegroundNotification()
