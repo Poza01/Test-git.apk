@@ -154,13 +154,16 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
                         onUtteranceEvent?.invoke("ondone", utteranceId)
                     }
                     if (utteranceId?.startsWith("web_utt_") == true) {
-                        // Web-driven single utterance completed, wait for web reader's next call
-                        webIdleJob?.cancel()
-                        webIdleJob = serviceScope.launch {
-                            kotlinx.coroutines.delay(2500L)
-                            if (_playbackState.value.isPlaying && !isWebAudioPlaying && tts?.isSpeaking != true) {
-                                _playbackState.update { it.copy(isPlaying = false, isPaused = false) }
-                                updateForegroundNotification()
+                        // Web-driven single utterance completed
+                        val expectedId = "web_utt_$currentWebUtteranceId"
+                        if (utteranceId == expectedId) {
+                            webIdleJob?.cancel()
+                            webIdleJob = serviceScope.launch {
+                                kotlinx.coroutines.delay(2500L)
+                                if (_playbackState.value.isPlaying && !isWebAudioPlaying && tts?.isSpeaking != true) {
+                                    _playbackState.update { it.copy(isPlaying = false, isPaused = false) }
+                                    updateForegroundNotification()
+                                }
                             }
                         }
                     } else {
@@ -170,7 +173,14 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
             }
 
             override fun onError(utteranceId: String?) {
-                Log.e(TAG, "Utterance error: $utteranceId")
+                Log.w(TAG, "Utterance error: $utteranceId, currentWebUtteranceId=$currentWebUtteranceId")
+                if (utteranceId?.startsWith("web_utt_") == true) {
+                    val expectedId = "web_utt_$currentWebUtteranceId"
+                    if (utteranceId != expectedId) {
+                        Log.d(TAG, "Ignoring onError for flushed utterance: $utteranceId")
+                        return
+                    }
+                }
                 serviceScope.launch {
                     if (!utteranceId.isNullOrBlank()) {
                         onUtteranceEvent?.invoke("onerror", utteranceId)
@@ -178,10 +188,15 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
                     if (utteranceId?.startsWith("web_utt_") == true) {
                         webIdleJob?.cancel()
                         _playbackState.update { it.copy(isPlaying = false, isPaused = false) }
+                        updateForegroundNotification()
                     } else {
                         handleParagraphCompleted()
                     }
                 }
+            }
+
+            override fun onStop(utteranceId: String?, interrupted: Boolean) {
+                Log.d(TAG, "Utterance stopped/interrupted: $utteranceId, interrupted=$interrupted")
             }
         })
     }
@@ -372,7 +387,30 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
+    fun pauseFromWeb() {
+        webIdleJob?.cancel()
+        if (tts?.isSpeaking == true) {
+            tts?.stop()
+        }
+        _playbackState.update { it.copy(isPlaying = false, isPaused = true) }
+        updateForegroundNotification()
+    }
+
+    fun stopFromWeb() {
+        webIdleJob?.cancel()
+        tts?.stop()
+        _playbackState.update {
+            it.copy(
+                isPlaying = false,
+                isPaused = false,
+                currentText = ""
+            )
+        }
+        updateForegroundNotification()
+    }
+
     fun stop() {
+        webIdleJob?.cancel()
         tts?.stop()
         _playbackState.update {
             it.copy(

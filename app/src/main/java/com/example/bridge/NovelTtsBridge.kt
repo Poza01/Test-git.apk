@@ -246,6 +246,22 @@ class NovelTtsBridge(
     }
 
     @JavascriptInterface
+    fun pauseFromWeb() {
+        mainHandler.post {
+            val service = getService() ?: TtsForegroundService.instance
+            service?.pauseFromWeb()
+        }
+    }
+
+    @JavascriptInterface
+    fun stopFromWeb() {
+        mainHandler.post {
+            val service = getService() ?: TtsForegroundService.instance
+            service?.stopFromWeb()
+        }
+    }
+
+    @JavascriptInterface
     fun pause() {
         mainHandler.post {
             val service = getService() ?: TtsForegroundService.instance
@@ -475,38 +491,28 @@ class NovelTtsBridge(
                                     utt.onstart({ type: 'start', utterance: utt });
                                 }
                             } else if (event === 'ondone') {
-                                if (window.speechSynthesis) {
-                                    window.speechSynthesis.speaking = false;
-                                    window.speechSynthesis.paused = false;
-                                }
                                 if (utt) {
                                     delete window.__android_tts_utterances[utteranceId];
                                     if (window.__android_active_utterance_id === utteranceId) {
                                         window.__android_active_utterance_id = null;
+                                    }
+                                    if (window.speechSynthesis && Object.keys(window.__android_tts_utterances).length === 0) {
+                                        window.speechSynthesis.speaking = false;
+                                        window.speechSynthesis.paused = false;
                                     }
                                     if (typeof utt.onend === 'function') {
                                         utt.onend({ type: 'end', utterance: utt });
                                     }
-                                } else if (window.__android_active_utterance_id) {
-                                    var activeId = window.__android_active_utterance_id;
-                                    var activeUtt = window.__android_tts_utterances[activeId];
-                                    if (activeUtt) {
-                                        delete window.__android_tts_utterances[activeId];
-                                        window.__android_active_utterance_id = null;
-                                        if (typeof activeUtt.onend === 'function') {
-                                            activeUtt.onend({ type: 'end', utterance: activeUtt });
-                                        }
-                                    }
                                 }
                             } else if (event === 'onerror') {
-                                if (window.speechSynthesis) {
-                                    window.speechSynthesis.speaking = false;
-                                    window.speechSynthesis.paused = false;
-                                }
                                 if (utt) {
                                     delete window.__android_tts_utterances[utteranceId];
                                     if (window.__android_active_utterance_id === utteranceId) {
                                         window.__android_active_utterance_id = null;
+                                    }
+                                    if (window.speechSynthesis && Object.keys(window.__android_tts_utterances).length === 0) {
+                                        window.speechSynthesis.speaking = false;
+                                        window.speechSynthesis.paused = false;
                                     }
                                     if (typeof utt.onerror === 'function') {
                                         utt.onerror({ type: 'error', error: 'native_tts_error', utterance: utt });
@@ -569,16 +575,16 @@ class NovelTtsBridge(
                                 window.__android_active_utterance_id = null;
                                 synth.speaking = false;
                                 synth.paused = false;
-                                if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.stop === 'function') {
-                                    window.AndroidTtsBridge.stop();
+                                if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.stopFromWeb === 'function') {
+                                    window.AndroidTtsBridge.stopFromWeb();
                                 }
                             } catch(e) {}
                         },
                         pause: function() {
                             try {
                                 synth.paused = true;
-                                if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.pause === 'function') {
-                                    window.AndroidTtsBridge.pause();
+                                if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.pauseFromWeb === 'function') {
+                                    window.AndroidTtsBridge.pauseFromWeb();
                                 }
                             } catch(e) {}
                         },
@@ -647,66 +653,86 @@ class NovelTtsBridge(
                         return (document.title || 'อ่านนิยาย').substring(0, 80);
                     }
 
+                    let webAudioDebounceTimer = null;
+
                     function notifyAudioPlaying(audio) {
                         try {
                             window.__active_html5_audio = audio;
-                            const engine = getAudioEngineName(audio);
-                            const title = (document.querySelector('h1, .chapter-title, #chapter-title, .title') || {}).innerText || document.title || "อ่านนิยายเว็บ";
-                            const text = getNovelReadingText();
-                            if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.onWebAudioStarted === 'function') {
-                                window.AndroidTtsBridge.onWebAudioStarted(title.trim(), text, engine);
-                            }
+                            if (webAudioDebounceTimer) clearTimeout(webAudioDebounceTimer);
+                            webAudioDebounceTimer = setTimeout(function() {
+                                try {
+                                    if (!audio || audio.paused) return;
+                                    const engine = getAudioEngineName(audio);
+                                    const title = (document.querySelector('h1, .chapter-title, #chapter-title, .title') || {}).innerText || document.title || "อ่านนิยายเว็บ";
+                                    const text = getNovelReadingText();
+                                    if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.onWebAudioStarted === 'function') {
+                                        window.AndroidTtsBridge.onWebAudioStarted(title.trim(), text, engine);
+                                    }
+                                } catch(e) {}
+                            }, 50);
                         } catch(e) {}
                     }
 
                     function notifyAudioPaused(audio) {
                         try {
-                            if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.onWebAudioPaused === 'function') {
-                                window.AndroidTtsBridge.onWebAudioPaused();
-                            }
+                            if (window.speechSynthesis && window.speechSynthesis.speaking) return;
+                            setTimeout(function() {
+                                try {
+                                    if (window.__active_html5_audio && !window.__active_html5_audio.paused) return;
+                                    let anyPlaying = false;
+                                    document.querySelectorAll('audio').forEach(function(a) {
+                                        if (!a.paused) anyPlaying = true;
+                                    });
+                                    if (anyPlaying) return;
+                                    if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.onWebAudioPaused === 'function') {
+                                        window.AndroidTtsBridge.onWebAudioPaused();
+                                    }
+                                } catch(e) {}
+                            }, 300);
                         } catch(e) {}
                     }
 
                     function notifyAudioEnded() {
                         try {
-                            if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.onWebAudioEnded === 'function') {
-                                window.AndroidTtsBridge.onWebAudioEnded();
-                            }
+                            if (window.speechSynthesis && window.speechSynthesis.speaking) return;
+                            setTimeout(function() {
+                                try {
+                                    if (window.__active_html5_audio && !window.__active_html5_audio.paused) return;
+                                    let anyPlaying = false;
+                                    document.querySelectorAll('audio').forEach(function(a) {
+                                        if (!a.paused) anyPlaying = true;
+                                    });
+                                    if (anyPlaying) return;
+                                    if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.onWebAudioEnded === 'function') {
+                                        window.AndroidTtsBridge.onWebAudioEnded();
+                                    }
+                                } catch(e) {}
+                            }, 1000);
                         } catch(e) {}
                     }
 
-                    function hookAudioInstance(audio) {
-                        if (!audio || audio.__novel_monitored) return;
-                        audio.__novel_monitored = true;
-                        audio.addEventListener('play', () => notifyAudioPlaying(audio));
-                        audio.addEventListener('playing', () => notifyAudioPlaying(audio));
-                        audio.addEventListener('pause', () => notifyAudioPaused(audio));
-                        audio.addEventListener('ended', notifyAudioEnded);
-                        audio.addEventListener('error', notifyAudioEnded);
-                    }
-
+                    // Safe, non-intrusive event capture on window
                     try {
-                        const origPlay = HTMLAudioElement.prototype.play;
-                        HTMLAudioElement.prototype.play = function() {
-                            hookAudioInstance(this);
-                            notifyAudioPlaying(this);
-                            return origPlay.apply(this, arguments);
-                        };
-                        const origPause = HTMLAudioElement.prototype.pause;
-                        HTMLAudioElement.prototype.pause = function() {
-                            notifyAudioPaused(this);
-                            return origPause.apply(this, arguments);
-                        };
-                    } catch(e) {}
+                        window.addEventListener('play', function(e) {
+                            const target = e.target;
+                            if (target && (target.tagName === 'AUDIO' || target instanceof HTMLMediaElement)) {
+                                notifyAudioPlaying(target);
+                            }
+                        }, true);
 
-                    try {
-                        const OrigAudio = window.Audio;
-                        window.Audio = function(src) {
-                            const inst = new OrigAudio(src);
-                            hookAudioInstance(inst);
-                            return inst;
-                        };
-                        window.Audio.prototype = OrigAudio.prototype;
+                        window.addEventListener('pause', function(e) {
+                            const target = e.target;
+                            if (target && (target.tagName === 'AUDIO' || target instanceof HTMLMediaElement)) {
+                                notifyAudioPaused(target);
+                            }
+                        }, true);
+
+                        window.addEventListener('ended', function(e) {
+                            const target = e.target;
+                            if (target && (target.tagName === 'AUDIO' || target instanceof HTMLMediaElement)) {
+                                notifyAudioEnded();
+                            }
+                        }, true);
                     } catch(e) {}
 
                     window.__mediaSessionHandlers = window.__mediaSessionHandlers || {};
@@ -718,14 +744,6 @@ class NovelTtsBridge(
                                 return origSetActionHandler(action, handler);
                             };
                         }
-                    } catch(e) {}
-
-                    try {
-                        document.querySelectorAll('audio').forEach(hookAudioInstance);
-                        const audObs = new MutationObserver(() => {
-                            document.querySelectorAll('audio').forEach(hookAudioInstance);
-                        });
-                        audObs.observe(document.documentElement || document.body, { childList: true, subtree: true });
                     } catch(e) {}
 
                     // 6. Unified Notification Control Actions for all engines (Device, Google, Microsoft)
@@ -780,7 +798,7 @@ class NovelTtsBridge(
                                     utt.onpause({ type: 'pause', utterance: utt });
                                 }
                             }
-                            const pauseBtn = document.querySelector('.tts-pause, .btn-pause, [data-action="pause"], #pause-button, .reader-pause, .audio-pause, .pause-btn, .btn-read-pause, [aria-label*="Pause"], [title*="หยุด"], [title*="Pause"], .fa-pause');
+                            const pauseBtn = document.querySelector('.tts-pause, [data-action="pause"], #pause-button, .reader-pause, .audio-pause, .pause-btn, [aria-label*="Pause"], [title*="หยุด"]');
                             if (pauseBtn) { pauseBtn.click(); }
                             return true;
                         } catch(e) {
@@ -791,6 +809,7 @@ class NovelTtsBridge(
 
                     window.__android_tts_next = function() {
                         try {
+                            try { sessionStorage.setItem('__novel_auto_play_next', 'true'); } catch(e){}
                             if (window.__mediaSessionHandlers && typeof window.__mediaSessionHandlers['nexttrack'] === 'function') {
                                 try { window.__mediaSessionHandlers['nexttrack'](); return 'mediasession'; } catch(e){}
                             }

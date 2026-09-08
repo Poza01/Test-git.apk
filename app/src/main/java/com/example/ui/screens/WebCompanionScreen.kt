@@ -478,8 +478,9 @@ fun WebCompanionScreen(
                             ViewGroup.LayoutParams.MATCH_PARENT
                         )
 
-                        // Hardware acceleration for smooth scrolling on Helio G85 Mali GPU
-                        setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
+                        // WebView internally manages hardware accelerated tile rendering via Chromium.
+                        // Setting LAYER_TYPE_NONE avoids unnecessary offscreen buffers that trigger Mesa DRM rendernode errors.
+                        setLayerType(android.view.View.LAYER_TYPE_NONE, null)
 
                         // Enable cookies and 3rd party cookies for SPA/Auth sites
                         val webViewInstanceRef = this
@@ -644,15 +645,19 @@ fun WebCompanionScreen(
                                     }, 600)
                                 }
 
-                                // Auto-continue reading next chapter if user was reading
+                                // Auto-continue reading next chapter ONLY if user triggered next chapter
                                 view?.postDelayed({
                                     view.evaluateJavascript("""
                                         (function() {
-                                            // Check if novel player / reader has auto-start or autoplay button
-                                            const autoPlayBtn = document.querySelector('.btn-read, .btn-play, #btn-tts, #read-novel, [data-action="auto-read"]');
-                                            if (autoPlayBtn && typeof autoPlayBtn.click === 'function') {
-                                                autoPlayBtn.click();
-                                            }
+                                            try {
+                                                if (sessionStorage.getItem('__novel_auto_play_next') === 'true') {
+                                                    sessionStorage.removeItem('__novel_auto_play_next');
+                                                    const autoPlayBtn = document.querySelector('.btn-read, .btn-play, #btn-tts, #read-novel, [data-action="auto-read"]');
+                                                    if (autoPlayBtn && typeof autoPlayBtn.click === 'function') {
+                                                        autoPlayBtn.click();
+                                                    }
+                                                }
+                                            } catch(e) {}
                                         })();
                                     """.trimIndent(), null)
                                 }, 1200)
