@@ -231,7 +231,7 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
         if (nextIndex < state.paragraphs.size) {
             speakParagraphInternal(nextIndex)
         } else {
-            // End of chapter playlist - Notify bridge to load next chapter automatically!
+            // End of chapter playlist - Notify bridge to load next chapter / flip page automatically!
             Log.d(TAG, "Chapter playlist reached end, triggering automatic next chapter transition")
             _playbackState.update {
                 it.copy(
@@ -243,7 +243,7 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
                 )
             }
             updateForegroundNotification()
-            com.example.bridge.NovelTtsBridge.notifyNextFromService()
+            com.example.bridge.NovelTtsBridge.notifyNextChapterFromService()
         }
     }
 
@@ -600,18 +600,55 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
         val pendingStop = PendingIntent.getService(this, 4, stopIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
         return try {
-            val remoteViews = RemoteViews(packageName, R.layout.notification_custom_player).apply {
+            val isPlaying = state.isPlaying
+            val subText = if (isPlaying) {
+                if (state.engineName.isNotBlank()) "🔊 กำลังอ่าน • ${state.engineName}" else "🔊 กำลังอ่านเสียงภาษาไทย"
+            } else {
+                "⏸️ พักชั่วคราว (แตะเพื่อเล่นต่อ)"
+            }
+
+            val collapsedViews = RemoteViews(packageName, R.layout.notification_custom_player).apply {
                 setTextViewText(R.id.notif_title, title)
-                setTextViewText(R.id.notif_subtext, if (state.isPlaying) "กำลังอ่านเสียง" else "พักชั่วคราว")
+                setTextViewText(R.id.notif_subtext, subText)
                 setImageViewResource(
                     R.id.btn_notif_play_pause,
-                    if (state.isPlaying) R.drawable.ic_notif_pause else R.drawable.ic_notif_play
+                    if (isPlaying) R.drawable.ic_notif_pause_dark else R.drawable.ic_notif_play_dark
                 )
                 setOnClickPendingIntent(R.id.btn_notif_prev, pendingPrev)
                 setOnClickPendingIntent(R.id.btn_notif_play_pause, pendingPlayPause)
                 setOnClickPendingIntent(R.id.btn_notif_next, pendingNext)
-                setOnClickPendingIntent(R.id.btn_notif_speaker, pendingContentIntent)
                 setOnClickPendingIntent(R.id.notif_root, pendingContentIntent)
+            }
+
+            val excerptText = if (state.currentText.isNotBlank()) {
+                state.currentText.trim().take(120)
+            } else if (state.totalParagraphs > 0 && state.activeParagraphIndex >= 0) {
+                "ย่อหน้าที่ ${state.activeParagraphIndex + 1} จาก ${state.totalParagraphs}"
+            } else {
+                "ระบบแปลงเสียงอ่านนิยายภาษาไทยทำงานในเบื้องหลังอย่างต่อเนื่อง"
+            }
+
+            val expandedViews = RemoteViews(packageName, R.layout.notification_player_expanded).apply {
+                setTextViewText(R.id.notif_big_title, title)
+                setTextViewText(R.id.notif_big_excerpt, excerptText)
+                
+                if (isPlaying) {
+                    setViewVisibility(R.id.notif_big_badge_playing, android.view.View.VISIBLE)
+                    setViewVisibility(R.id.notif_big_badge_paused, android.view.View.GONE)
+                } else {
+                    setViewVisibility(R.id.notif_big_badge_playing, android.view.View.GONE)
+                    setViewVisibility(R.id.notif_big_badge_paused, android.view.View.VISIBLE)
+                }
+
+                setImageViewResource(
+                    R.id.btn_notif_big_play_pause,
+                    if (isPlaying) R.drawable.ic_notif_pause_dark else R.drawable.ic_notif_play_dark
+                )
+                setOnClickPendingIntent(R.id.btn_notif_big_prev, pendingPrev)
+                setOnClickPendingIntent(R.id.btn_notif_big_play_pause, pendingPlayPause)
+                setOnClickPendingIntent(R.id.btn_notif_big_next, pendingNext)
+                setOnClickPendingIntent(R.id.btn_notif_big_stop, pendingStop)
+                setOnClickPendingIntent(R.id.notif_big_root, pendingContentIntent)
             }
 
             NotificationCompat.Builder(this, CHANNEL_ID)
@@ -621,8 +658,9 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
-                .setCustomContentView(remoteViews)
-                .setCustomBigContentView(remoteViews)
+                .setStyle(NotificationCompat.DecoratedCustomViewStyle())
+                .setCustomContentView(collapsedViews)
+                .setCustomBigContentView(expandedViews)
                 .build()
         } catch (e: Exception) {
             Log.e("TtsService", "Error creating custom notification, fallback to standard", e)

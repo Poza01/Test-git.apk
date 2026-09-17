@@ -2,102 +2,107 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/notif_root"
     android:layout_width="match_parent"
-    android:layout_height="64dp"
-    android:orientation="vertical"
+    android:layout_height="72dp"
+    android:orientation="horizontal"
     android:background="@drawable/bg_notif_card"
     android:paddingLeft="12dp"
     android:paddingRight="12dp"
-    android:paddingTop="6dp"
-    android:paddingBottom="6dp"
+    android:paddingTop="9dp"
+    android:paddingBottom="9dp"
     android:gravity="center_vertical">
 
-    <!-- Top mini title row -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:layout_marginBottom="3dp">
+    <!-- Left Cover Artwork with rounded corners -->
+    <FrameLayout
+        android:id="@+id/notif_cover_frame"
+        android:layout_width="50dp"
+        android:layout_height="50dp"
+        android:background="@drawable/bg_notif_cover_card"
+        android:padding="2dp">
 
+        <ImageView
+            android:id="@+id/notif_cover"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:src="@drawable/img_app_cover_1787456498575"
+            android:scaleType="centerCrop"
+            android:contentDescription="Novel Cover" />
+    </FrameLayout>
+
+    <!-- Center Info Column -->
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:layout_marginLeft="12dp"
+        android:layout_marginRight="8dp">
+
+        <!-- Title -->
         <TextView
             android:id="@+id/notif_title"
-            android:layout_width="0dp"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="ระบบอ่านนิยายเสียง"
-            android:textColor="#F3F4F6"
-            android:textSize="11sp"
+            android:text="อ่านนิยายเว็บ"
+            android:textColor="#FFFFFF"
+            android:textSize="13.5sp"
             android:textStyle="bold"
             android:singleLine="true"
             android:ellipsize="end" />
 
+        <!-- Subtitle / Reading Text / Engine -->
         <TextView
             android:id="@+id/notif_subtext"
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="กำลังอ่าน"
-            android:textColor="#5EEAD4"
-            android:textSize="10sp"
-            android:layout_marginLeft="6dp" />
+            android:layout_marginTop="2dp"
+            android:text="🔊 กำลังอ่านเสียงเบื้องหลัง"
+            android:textColor="#94A3B8"
+            android:textSize="11.5sp"
+            android:singleLine="true"
+            android:ellipsize="end" />
     </LinearLayout>
 
-    <!-- Main Player Control Row matching screenshot directly -->
+    <!-- Right Controls Action Bar -->
     <LinearLayout
-        android:layout_width="match_parent"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center_vertical">
 
-        <!-- Speaker / Megaphone Icon Badge (Left) -->
-        <ImageView
-            android:id="@+id/btn_notif_speaker"
-            android:layout_width="38dp"
-            android:layout_height="38dp"
-            android:clickable="true"
-            android:focusable="false"
-            android:background="@drawable/bg_notif_circle_teal"
-            android:src="@drawable/ic_speaker_megaphone"
-            android:scaleType="centerInside"
-            android:contentDescription="Speaker" />
-
-        <!-- Previous Button (Grey Circle with <<) -->
+        <!-- Previous Button -->
         <ImageView
             android:id="@+id/btn_notif_prev"
-            android:layout_width="38dp"
-            android:layout_height="38dp"
-            android:layout_marginLeft="12dp"
-            android:clickable="true"
-            android:focusable="false"
-            android:background="@drawable/bg_notif_circle_grey"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="@drawable/bg_notif_btn_glass"
             android:src="@drawable/ic_notif_prev"
+            android:padding="8dp"
             android:scaleType="centerInside"
-            android:contentDescription="ย้อนบรรทัด" />
+            android:contentDescription="ย้อนกลับ" />
 
-        <!-- Play/Pause Button (Grey Circle with || or >) -->
+        <!-- Play / Pause Main Button -->
         <ImageView
             android:id="@+id/btn_notif_play_pause"
-            android:layout_width="38dp"
-            android:layout_height="38dp"
-            android:layout_marginLeft="10dp"
-            android:clickable="true"
-            android:focusable="false"
-            android:background="@drawable/bg_notif_circle_grey"
-            android:src="@drawable/ic_notif_pause"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_marginLeft="8dp"
+            android:background="@drawable/bg_notif_play_amber"
+            android:src="@drawable/ic_notif_pause_dark"
+            android:padding="9dp"
             android:scaleType="centerInside"
             android:contentDescription="เล่นหรือพัก" />
 
-        <!-- Next Button (Grey Circle with >>) -->
+        <!-- Next Button -->
         <ImageView
             android:id="@+id/btn_notif_next"
-            android:layout_width="38dp"
-            android:layout_height="38dp"
-            android:layout_marginLeft="10dp"
-            android:clickable="true"
-            android:focusable="false"
-            android:background="@drawable/bg_notif_circle_grey"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:layout_marginLeft="8dp"
+            android:background="@drawable/bg_notif_btn_glass"
             android:src="@drawable/ic_notif_next"
+            android:padding="8dp"
             android:scaleType="centerInside"
-            android:contentDescription="บรรทัดถัดไป" />
-
+            android:contentDescription="ถัดไป" />
     </LinearLayout>
+
 </LinearLayout>

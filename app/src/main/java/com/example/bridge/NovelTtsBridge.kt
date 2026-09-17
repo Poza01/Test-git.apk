@@ -56,6 +56,19 @@ class NovelTtsBridge(
         }
     }
 
+    fun onNextChapterFromService() {
+        mainHandler.post {
+            getWebView()?.evaluateJavascript("""
+                (function() {
+                    if (window.__novel_auto_next_chapter_or_page && typeof window.__novel_auto_next_chapter_or_page === 'function') {
+                        return window.__novel_auto_next_chapter_or_page();
+                    }
+                    return false;
+                })();
+            """.trimIndent(), null)
+        }
+    }
+
     fun onPrevFromNotification() {
         mainHandler.post {
             getWebView()?.evaluateJavascript("""
@@ -404,6 +417,10 @@ class NovelTtsBridge(
             activeBridge?.onNextFromNotification()
         }
 
+        fun notifyNextChapterFromService() {
+            activeBridge?.onNextChapterFromService()
+        }
+
         fun notifyPrevFromService() {
             activeBridge?.onPrevFromNotification()
         }
@@ -425,7 +442,76 @@ class NovelTtsBridge(
         const val INJECTION_SCRIPT = """
             (function() {
                 try {
-                    console.log("[NovelAI Android Bridge] Initializing Full Web Speech & TTS Bridge v2");
+                    console.log("[NovelAI Android Bridge] Initializing Full Web Speech & TTS Bridge v3");
+
+                    // 0. Background Throttling & Visibility Polyfill (Crucial when screen is off)
+                    try {
+                        Object.defineProperty(document, 'hidden', {
+                            get: function() { return false; },
+                            configurable: true
+                        });
+                        Object.defineProperty(document, 'visibilityState', {
+                            get: function() { return 'visible'; },
+                            configurable: true
+                        });
+                        Object.defineProperty(document, 'webkitHidden', {
+                            get: function() { return false; },
+                            configurable: true
+                        });
+                        Object.defineProperty(document, 'webkitVisibilityState', {
+                            get: function() { return 'visible'; },
+                            configurable: true
+                        });
+
+                        window.addEventListener('visibilitychange', function(e) {
+                            e.stopImmediatePropagation();
+                        }, true);
+                        document.addEventListener('visibilitychange', function(e) {
+                            e.stopImmediatePropagation();
+                        }, true);
+
+                        const origRAF = window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : null;
+                        let lastRafCall = Date.now();
+                        window.requestAnimationFrame = function(callback) {
+                            const now = Date.now();
+                            if (now - lastRafCall > 150) {
+                                lastRafCall = now;
+                                return setTimeout(function() {
+                                    callback(Date.now());
+                                }, 16);
+                            }
+                            lastRafCall = now;
+                            if (origRAF) {
+                                return origRAF(callback);
+                            } else {
+                                return setTimeout(function() { callback(Date.now()); }, 16);
+                            }
+                        };
+                    } catch(vErr) {
+                        console.warn("Visibility polyfill error", vErr);
+                    }
+
+                    // Helper to simulate complete user click
+                    function simulateFullClick(el) {
+                        if (!el) return;
+                        try {
+                            const events = ['mouseover', 'mouseenter', 'mousedown', 'mouseup', 'click'];
+                            events.forEach(function(eventType) {
+                                const evt = new MouseEvent(eventType, {
+                                    view: window,
+                                    bubbles: true,
+                                    cancelable: true,
+                                    buttons: 1
+                                });
+                                el.dispatchEvent(evt);
+                            });
+                            if (typeof el.click === 'function') {
+                                el.click();
+                            }
+                        } catch(e) {
+                            try { el.click(); } catch(err){}
+                        }
+                    }
 
                     // 1. Prepare speech synthesis voices polyfill
                     let cachedVoices = [];
@@ -477,6 +563,8 @@ class NovelTtsBridge(
                     window.__android_tts_utterances = window.__android_tts_utterances || {};
                     window.__android_tts_history = window.__android_tts_history || [];
                     let uttCounter = 0;
+                    let lastUtteranceEndTime = 0;
+                    let autoNextChapterDebounceTimer = null;
 
                     // Global Android -> JS Event Dispatcher
                     window.__android_tts_callback = function(event, utteranceId) {
@@ -484,6 +572,10 @@ class NovelTtsBridge(
                             const utt = window.__android_tts_utterances[utteranceId];
                             if (event === 'onstart') {
                                 window.__android_active_utterance_id = utteranceId;
+                                if (autoNextChapterDebounceTimer) {
+                                    clearTimeout(autoNextChapterDebounceTimer);
+                                    autoNextChapterDebounceTimer = null;
+                                }
                                 if (window.speechSynthesis) {
                                     window.speechSynthesis.speaking = true;
                                     window.speechSynthesis.paused = false;
@@ -492,6 +584,7 @@ class NovelTtsBridge(
                                     utt.onstart({ type: 'start', utterance: utt });
                                 }
                             } else if (event === 'ondone') {
+                                lastUtteranceEndTime = Date.now();
                                 if (utt) {
                                     delete window.__android_tts_utterances[utteranceId];
                                     if (window.__android_active_utterance_id === utteranceId) {
@@ -504,6 +597,44 @@ class NovelTtsBridge(
                                     if (typeof utt.onend === 'function') {
                                         utt.onend({ type: 'end', utterance: utt });
                                     }
+                                }
+
+                                // Check if this was the last paragraph/sentence of the chapter or page
+                                if (Object.keys(window.__android_tts_utterances).length === 0) {
+                                    if (autoNextChapterDebounceTimer) clearTimeout(autoNextChapterDebounceTimer);
+                                    autoNextChapterDebounceTimer = setTimeout(function() {
+                                        // If after 2.0s no new sentence was queued, check if reader has reached the end of the chapter/page
+                                        if (!window.__android_active_utterance_id && Object.keys(window.__android_tts_utterances).length === 0) {
+                                            const activeSentenceSelectors = [
+                                                '.reading', '.tts-reading', '.active-sentence', '.highlight-reading',
+                                                '.highlight', '[data-reading="true"]', '.current-read', '.reading-active',
+                                                '.active-para', '.speech-highlight', '.speaking', '.tts-active',
+                                                'span.active', 'p.active', '.text-reading', '.current-sentence'
+                                            ];
+                                            let currentEl = null;
+                                            for (let sel of activeSentenceSelectors) {
+                                                currentEl = document.querySelector(sel);
+                                                if (currentEl) break;
+                                            }
+
+                                            // If last element in container or near bottom, trigger auto next chapter/page
+                                            let isAtEnd = false;
+                                            if (currentEl) {
+                                                const container = currentEl.closest('.chapter-content, #chapter-content, .novel-content, #novel-content, .reading-content, article, main, body');
+                                                if (container) {
+                                                    const allParas = container.querySelectorAll('p, .sentence, span, .text-line');
+                                                    if (allParas.length > 0 && allParas[allParas.length - 1] === currentEl) {
+                                                        isAtEnd = true;
+                                                    }
+                                                }
+                                            }
+
+                                            if (isAtEnd) {
+                                                console.log("[NovelAI Bridge] Detected end of chapter/page paragraphs. Flipping to next chapter automatically.");
+                                                window.__novel_auto_next_chapter_or_page();
+                                            }
+                                        }
+                                    }, 2000);
                                 }
                             } else if (event === 'onerror') {
                                 if (utt) {
@@ -524,6 +655,150 @@ class NovelTtsBridge(
                             console.error("[TTS Callback Error]", cbErr);
                         }
                     };
+
+                    // 4. Universal Auto Next Chapter / Next Page Hopper Function
+                    window.__novel_auto_next_chapter_or_page = function() {
+                        try {
+                            console.log("[NovelAI Bridge] Triggering Auto Next Chapter / Page");
+                            try { sessionStorage.setItem('__novel_auto_play_next', 'true'); } catch(e){}
+
+                            // Direct SPA Reader Functions
+                            if (window.reader && typeof window.reader.nextChapter === 'function') {
+                                try { window.reader.nextChapter(); return 'reader_nextChapter'; } catch(e){}
+                            }
+                            if (window.reader && typeof window.reader.nextPage === 'function') {
+                                try { window.reader.nextPage(); return 'reader_nextPage'; } catch(e){}
+                            }
+                            if (typeof window.readNextChapter === 'function') {
+                                try { window.readNextChapter(); return 'readNextChapter'; } catch(e){}
+                            }
+                            if (typeof window.nextChapter === 'function') {
+                                try { window.nextChapter(); return 'nextChapter'; } catch(e){}
+                            }
+                            if (typeof window.goToNextChapter === 'function') {
+                                try { window.goToNextChapter(); return 'goToNextChapter'; } catch(e){}
+                            }
+
+                            // Dedicated Next Chapter / Next Page Selectors
+                            const specificSelectors = [
+                                'a.btn-next', 'a.next-chapter', 'a#next-chapter', 'a.chapter-next',
+                                'a[rel="next"]', 'link[rel="next"]', '.btn-next-chapter', '#btn-next-chapter',
+                                '.page-next', '.btn-page-next', '#next-page-btn', '.next-page',
+                                '[data-action="next-chapter"]', '[data-action="next-page"]',
+                                '.reader-next-chapter', '.tts-next-chapter', '#next-chapter-link',
+                                'a[title*="ตอนถัดไป"]', 'a[title*="ตอนต่อไป"]', 'a[title*="บทถัดไป"]',
+                                'button[title*="ตอนถัดไป"]', 'button[title*="ตอนต่อไป"]', 'button[title*="บทถัดไป"]',
+                                'a:has(.fa-angle-right)', 'a:has(.fa-chevron-right)', 'a:has(.fa-arrow-right)',
+                                'button:has(.fa-angle-right)', 'button:has(.fa-chevron-right)', 'button:has(.fa-arrow-right)'
+                            ];
+
+                            for (let sel of specificSelectors) {
+                                let el = document.querySelector(sel);
+                                if (el) {
+                                    simulateFullClick(el);
+                                    return 'clicked_selector_' + sel;
+                                }
+                            }
+
+                            // Search all links and buttons by Thai/English/Asian keywords
+                            const nextKeywords = [
+                                'ตอนต่อไป', 'ตอนถัดไป', 'บทต่อไป', 'บทถัดไป', 'หน้าต่อไป', 'หน้าถัดไป',
+                                'next chapter', 'next-chapter', 'next page', '下一章', '下一页', '下一頁', '다음 화', '다음'
+                            ];
+
+                            const allClickables = document.querySelectorAll('a, button, [role="button"], span.btn, div.btn');
+                            for (let el of allClickables) {
+                                const txt = (el.innerText || el.textContent || '').trim().toLowerCase();
+                                const title = (el.getAttribute('title') || '').toLowerCase();
+                                const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+                                const fullStr = txt + ' ' + title + ' ' + aria;
+
+                                for (let kw of nextKeywords) {
+                                    if (fullStr.includes(kw) && !fullStr.includes('ก่อน') && !fullStr.includes('previous') && !fullStr.includes('prev')) {
+                                        simulateFullClick(el);
+                                        return 'clicked_text_keyword_' + kw;
+                                    }
+                                }
+                            }
+
+                            // Dispatches Keyboard ArrowRight / PageDown event (turns page on SPA web readers)
+                            ['ArrowRight', 'PageDown'].forEach(key => {
+                                const code = key === 'ArrowRight' ? 39 : 34;
+                                ['keydown', 'keyup'].forEach(type => {
+                                    const event = new KeyboardEvent(type, {
+                                        key: key,
+                                        code: key,
+                                        keyCode: code,
+                                        which: code,
+                                        bubbles: true,
+                                        cancelable: true
+                                    });
+                                    document.dispatchEvent(event);
+                                    window.dispatchEvent(event);
+                                });
+                            });
+
+                            // Simulate tap on right edge of reader / viewport
+                            const readerContainer = document.querySelector('.reader-container, .novel-content, #reader, #chapter-content, .chapter-body, .reading-area, body');
+                            if (readerContainer) {
+                                const rect = readerContainer.getBoundingClientRect();
+                                const clickX = rect.right - (rect.width * 0.1);
+                                const clickY = rect.top + (rect.height * 0.5);
+                                ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(type => {
+                                    const clickEvt = new MouseEvent(type, {
+                                        bubbles: true,
+                                        cancelable: true,
+                                        view: window,
+                                        clientX: clickX,
+                                        clientY: clickY,
+                                        screenX: clickX,
+                                        screenY: clickY
+                                    });
+                                    readerContainer.dispatchEvent(clickEvt);
+                                });
+                            }
+
+                            return 'dispatched_navigation_triggers';
+                        } catch(e) {
+                            console.error("Auto next chapter error", e);
+                            return 'error: ' + e.message;
+                        }
+                    };
+
+                    // 5. SPA Reader MutationObserver for dynamic page turns without page reload
+                    try {
+                        let lastObservedTitle = document.title;
+                        let lastObservedText = '';
+                        const spaObserver = new MutationObserver(function() {
+                            if (sessionStorage.getItem('__novel_auto_play_next') === 'true') {
+                                const currentTitle = document.title;
+                                const mainContent = document.querySelector('.chapter-content, #chapter-content, .novel-content, #novel-content, .reading-content, .content, article, main, .entry-content');
+                                const textSample = mainContent ? (mainContent.innerText || '').substring(0, 150) : '';
+
+                                if ((currentTitle && currentTitle !== lastObservedTitle) || (textSample && textSample !== lastObservedText)) {
+                                    lastObservedTitle = currentTitle;
+                                    lastObservedText = textSample;
+                                    console.log("[NovelAI Bridge] SPA Reader content updated! Starting auto-play for next chapter.");
+                                    setTimeout(function() {
+                                        const playBtn = document.querySelector('.btn-read, .btn-play, #btn-tts, #read-novel, [data-action="auto-read"], .tts-play, #play-button, .reader-play, .audio-play, .play-btn, .btn-read-play, .tts-btn, #tts-play, button[title*="อ่าน"], button[title*="Play"], [aria-label*="Play"], [aria-label*="อ่าน"], [title*="เล่น"], [title*="Play"], button:has(.fa-play), .fa-play, [data-action="read"], .btn-start-read');
+                                        if (playBtn) {
+                                            sessionStorage.removeItem('__novel_auto_play_next');
+                                            simulateFullClick(playBtn);
+                                        } else if (window.reader && typeof window.reader.play === 'function') {
+                                            sessionStorage.removeItem('__novel_auto_play_next');
+                                            window.reader.play();
+                                        } else if (typeof window.readNovel === 'function') {
+                                            sessionStorage.removeItem('__novel_auto_play_next');
+                                            window.readNovel();
+                                        }
+                                    }, 400);
+                                }
+                            }
+                        });
+                        spaObserver.observe(document.body || document.documentElement, { childList: true, subtree: true, characterData: true });
+                    } catch(obsErr) {
+                        console.warn("SPA observer error", obsErr);
+                    }
 
                     // 4. Complete SpeechSynthesis Mock / Wrapper
                     const synth = {

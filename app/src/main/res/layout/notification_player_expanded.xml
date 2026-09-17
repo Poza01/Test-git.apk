@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/notif_big_root"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/bg_notif_card"
+    android:paddingLeft="14dp"
+    android:paddingRight="14dp"
+    android:paddingTop="12dp"
+    android:paddingBottom="12dp">
+
+    <!-- Top Header Bar -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="8dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="📖 Novel AI Voice Player"
+            android:textColor="#F59E0B"
+            android:textSize="11sp"
+            android:textStyle="bold" />
+
+        <!-- Spacer FrameLayout (allowed in RemoteViews) -->
+        <FrameLayout
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <!-- Status Badge Playing -->
+        <TextView
+            android:id="@+id/notif_big_badge_playing"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_notif_badge_playing"
+            android:paddingLeft="8dp"
+            android:paddingRight="8dp"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp"
+            android:text="● กำลังเล่น"
+            android:textColor="#34D399"
+            android:textSize="10sp"
+            android:textStyle="bold" />
+
+        <!-- Status Badge Paused -->
+        <TextView
+            android:id="@+id/notif_big_badge_paused"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_notif_badge_paused"
+            android:paddingLeft="8dp"
+            android:paddingRight="8dp"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp"
+            android:text="⏸ พักชั่วคราว"
+            android:textColor="#FBBF24"
+            android:textSize="10sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
+
+        <!-- Stop / Close Button -->
+        <ImageView
+            android:id="@+id/btn_notif_big_stop"
+            android:layout_width="26dp"
+            android:layout_height="26dp"
+            android:layout_marginLeft="8dp"
+            android:background="@drawable/bg_notif_btn_glass"
+            android:src="@drawable/ic_notif_stop"
+            android:padding="6dp"
+            android:scaleType="centerInside"
+            android:contentDescription="หยุดและปิด" />
+    </LinearLayout>
+
+    <!-- Main Content Section: Cover + Title + Excerpt -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <!-- Cover Art -->
+        <FrameLayout
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:background="@drawable/bg_notif_cover_card"
+            android:padding="2dp">
+
+            <ImageView
+                android:id="@+id/notif_big_cover"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:src="@drawable/img_app_cover_1787456498575"
+                android:scaleType="centerCrop"
+                android:contentDescription="Novel Cover" />
+        </FrameLayout>
+
+        <!-- Chapter Title & Reading Line Excerpt -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:layout_marginLeft="12dp">
+
+            <TextView
+                android:id="@+id/notif_big_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="อ่านนิยายเว็บ"
+                android:textColor="#FFFFFF"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:ellipsize="end" />
+
+            <TextView
+                android:id="@+id/notif_big_excerpt"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:text="ระบบอ่านนิยายเสียงภาษาไทยทำงานในพื้นหลัง..."
+                android:textColor="#CBD5E1"
+                android:textSize="12sp"
+                android:maxLines="2"
+                android:ellipsize="end" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Bottom Audio Controls Row -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:layout_marginTop="10dp">
+
+        <!-- Previous Line Button -->
+        <ImageView
+            android:id="@+id/btn_notif_big_prev"
+            android:layout_width="42dp"
+            android:layout_height="42dp"
+            android:background="@drawable/bg_notif_btn_glass"
+            android:src="@drawable/ic_notif_prev"
+            android:padding="9dp"
+            android:scaleType="centerInside"
+            android:contentDescription="ย้อนบรรทัด" />
+
+        <!-- Main Big Play/Pause Button -->
+        <ImageView
+            android:id="@+id/btn_notif_big_play_pause"
+            android:layout_width="50dp"
+            android:layout_height="50dp"
+            android:layout_marginLeft="20dp"
+            android:layout_marginRight="20dp"
+            android:background="@drawable/bg_notif_play_amber"
+            android:src="@drawable/ic_notif_pause_dark"
+            android:padding="11dp"
+            android:scaleType="centerInside"
+            android:contentDescription="เล่นหรือพัก" />
+
+        <!-- Next Line Button -->
+        <ImageView
+            android:id="@+id/btn_notif_big_next"
+            android:layout_width="42dp"
+            android:layout_height="42dp"
+            android:background="@drawable/bg_notif_btn_glass"
+            android:src="@drawable/ic_notif_next"
+            android:padding="9dp"
+            android:scaleType="centerInside"
+            android:contentDescription="บรรทัดถัดไป" />
+
+    </LinearLayout>
+
+</LinearLayout>

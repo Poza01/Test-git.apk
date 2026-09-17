@@ -963,11 +963,24 @@ fun WebCompanionScreen(
                                                     '[aria-label*="Play"]', '[aria-label*="อ่าน"]', '[title*="เล่น"]', '[title*="Play"]',
                                                     'button:has(.fa-play)', '.fa-play', '[data-action="read"]', '.btn-start-read'
                                                 ];
+                                                function simulateClick(el) {
+                                                    if (!el) return;
+                                                    try {
+                                                        ['mouseover', 'mouseenter', 'mousedown', 'mouseup', 'click'].forEach(function(evtType) {
+                                                            var evt = new MouseEvent(evtType, { bubbles: true, cancelable: true, view: window, buttons: 1 });
+                                                            el.dispatchEvent(evt);
+                                                        });
+                                                        if (typeof el.click === 'function') el.click();
+                                                    } catch(e) {
+                                                        try { el.click(); } catch(err){}
+                                                    }
+                                                }
+
                                                 for (let sel of playSelectors) {
                                                     let btn = document.querySelector(sel);
-                                                    if (btn && typeof btn.click === 'function') {
+                                                    if (btn) {
                                                         sessionStorage.removeItem('__novel_auto_play_next');
-                                                        btn.click();
+                                                        simulateClick(btn);
                                                         return true;
                                                     }
                                                 }
