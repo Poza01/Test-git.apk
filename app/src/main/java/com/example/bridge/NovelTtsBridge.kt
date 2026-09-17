@@ -8,6 +8,7 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
 import android.util.Base64
+import android.util.Log
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.widget.Toast
@@ -377,7 +378,12 @@ class NovelTtsBridge(
         if (base64Data.isNullOrBlank()) return
         val rawName = (fileName?.ifBlank { null } ?: "novel_${System.currentTimeMillis()}.txt")
         val cleanFileName = rawName.replace("[/\\\\:*?\"<>|]".toRegex(), "_")
-        val cleanMime = mimeType?.ifBlank { null } ?: if (cleanFileName.endsWith(".txt", ignoreCase = true)) "text/plain" else "application/octet-stream"
+        val cleanMime = mimeType?.ifBlank { null } ?: when {
+            cleanFileName.endsWith(".json", ignoreCase = true) -> "application/json"
+            cleanFileName.endsWith(".txt", ignoreCase = true) -> "text/plain"
+            cleanFileName.endsWith(".epub", ignoreCase = true) -> "application/epub+zip"
+            else -> "application/octet-stream"
+        }
 
         Thread {
             try {
@@ -415,8 +421,24 @@ class NovelTtsBridge(
                     }
                 }
 
+                // Also save to app-specific download directory for reliable in-app downloads manager
+                try {
+                    val appDownloadDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+                    if (appDownloadDir != null) {
+                        if (!appDownloadDir.exists()) appDownloadDir.mkdirs()
+                        val appTarget = File(appDownloadDir, cleanFileName)
+                        FileOutputStream(appTarget).use { fos ->
+                            fos.write(bytes)
+                            fos.flush()
+                        }
+                    }
+                    com.example.data.download.DownloadHelper.refreshDownloads(context)
+                } catch (eApp: Exception) {
+                    Log.w("NovelTtsBridge", "App download copy error: ${eApp.message}")
+                }
+
                 mainHandler.post {
-                    Toast.makeText(context, "ดาวน์โหลดไฟล์สำเร็จ: $cleanFileName\n(บันทึกในโฟลเดอร์ Download)", Toast.LENGTH_LONG).show()
+                    Toast.makeText(context, "ดาวน์โหลดไฟล์สำเร็จ: $cleanFileName", Toast.LENGTH_SHORT).show()
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -463,8 +485,9 @@ class NovelTtsBridge(
          * Injected into the WebView to provide full standard getVoices(), speak(), pause(), cancel(),
          * and bidirectional callback support (onstart, onend, onerror) so automatic continuous paragraph
          * progression on web novel readers works seamlessly.
+         * Split into parts to ensure each string literal stays safely under JVM UTF8 string limit (65535 bytes).
          */
-        const val INJECTION_SCRIPT = """
+        private const val INJECTION_PART_1 = """
             (function() {
                 try {
                     console.log("[NovelAI Android Bridge] Initializing Full Web Speech & TTS Bridge v3");
@@ -591,12 +614,79 @@ class NovelTtsBridge(
                     let lastUtteranceEndTime = 0;
                     let autoNextChapterDebounceTimer = null;
 
+                    function dispatchUtteranceEvent(utt, eventType, charIndex) {
+                        if (!utt) return;
+                        try {
+                            let evt = null;
+                            if (typeof SpeechSynthesisEvent === 'function') {
+                                try {
+                                    evt = new SpeechSynthesisEvent(eventType, {
+                                        utterance: utt,
+                                        charIndex: charIndex || (utt.text ? utt.text.length : 0),
+                                        elapsedTime: 1,
+                                        name: eventType
+                                    });
+                                } catch(e) {}
+                            }
+                            if (!evt) {
+                                try {
+                                    evt = new CustomEvent(eventType, {
+                                        detail: { utterance: utt, charIndex: charIndex || 0 }
+                                    });
+                                } catch(e) {
+                                    evt = { type: eventType };
+                                }
+                                evt.utterance = utt;
+                                evt.charIndex = charIndex || (utt.text ? utt.text.length : 0);
+                                evt.elapsedTime = 1;
+                                evt.name = eventType;
+                            }
+                            try { Object.defineProperty(evt, 'target', { value: utt, writable: true, configurable: true }); } catch(e) { evt.target = utt; }
+                            try { Object.defineProperty(evt, 'currentTarget', { value: utt, writable: true, configurable: true }); } catch(e) { evt.currentTarget = utt; }
+
+                            // 1. Dispatch to addEventListener listeners on utterance
+                            if (typeof utt.dispatchEvent === 'function') {
+                                try { utt.dispatchEvent(evt); } catch(e) {}
+                            }
+                            // 2. Dispatch to on<event> property on utterance (e.g. utt.onend, utt.onstart)
+                            const handlerName = 'on' + eventType;
+                            if (typeof utt[handlerName] === 'function') {
+                                try { utt[handlerName].call(utt, evt); } catch(e) {}
+                            }
+                            // 3. Dispatch to window.speechSynthesis if listeners exist
+                            if (window.speechSynthesis) {
+                                if (typeof window.speechSynthesis[handlerName] === 'function') {
+                                    try { window.speechSynthesis[handlerName].call(window.speechSynthesis, evt); } catch(e) {}
+                                }
+                                if (typeof window.speechSynthesis.dispatchEvent === 'function') {
+                                    try { window.speechSynthesis.dispatchEvent(evt); } catch(e) {}
+                                }
+                            }
+                        } catch(err) {
+                            console.warn("[Bridge] dispatchUtteranceEvent error", err);
+                        }
+                    }
+
                     // Global Android -> JS Event Dispatcher
                     window.__android_tts_callback = function(event, utteranceId) {
                         try {
-                            const utt = window.__android_tts_utterances[utteranceId];
+                            let utt = window.__android_tts_utterances[utteranceId];
+                            let activeKey = utteranceId;
+                            if (!utt) {
+                                if (window.__android_active_utterance_id && window.__android_tts_utterances[window.__android_active_utterance_id]) {
+                                    activeKey = window.__android_active_utterance_id;
+                                    utt = window.__android_tts_utterances[activeKey];
+                                } else {
+                                    const keys = Object.keys(window.__android_tts_utterances);
+                                    if (keys.length > 0) {
+                                        activeKey = keys[0];
+                                        utt = window.__android_tts_utterances[activeKey];
+                                    }
+                                }
+                            }
+
                             if (event === 'onstart') {
-                                window.__android_active_utterance_id = utteranceId;
+                                window.__android_active_utterance_id = activeKey;
                                 if (autoNextChapterDebounceTimer) {
                                     clearTimeout(autoNextChapterDebounceTimer);
                                     autoNextChapterDebounceTimer = null;
@@ -605,27 +695,32 @@ class NovelTtsBridge(
                                     window.speechSynthesis.speaking = true;
                                     window.speechSynthesis.paused = false;
                                 }
-                                if (utt && typeof utt.onstart === 'function') {
-                                    utt.onstart({ type: 'start', utterance: utt });
+                                if (utt) {
+                                    dispatchUtteranceEvent(utt, 'start');
                                 }
                             } else if (event === 'ondone') {
                                 lastUtteranceEndTime = Date.now();
+                                if (activeKey) {
+                                    delete window.__android_tts_utterances[activeKey];
+                                }
+                                if (window.__android_active_utterance_id === activeKey) {
+                                    window.__android_active_utterance_id = null;
+                                }
+                                if (window.speechSynthesis) {
+                                    window.speechSynthesis.speaking = (window.__android_speech_queue && window.__android_speech_queue.length > 0);
+                                    window.speechSynthesis.paused = false;
+                                }
                                 if (utt) {
-                                    delete window.__android_tts_utterances[utteranceId];
-                                    if (window.__android_active_utterance_id === utteranceId) {
-                                        window.__android_active_utterance_id = null;
-                                    }
-                                    if (window.speechSynthesis && Object.keys(window.__android_tts_utterances).length === 0) {
-                                        window.speechSynthesis.speaking = false;
-                                        window.speechSynthesis.paused = false;
-                                    }
-                                    if (typeof utt.onend === 'function') {
-                                        utt.onend({ type: 'end', utterance: utt });
-                                    }
+                                    dispatchUtteranceEvent(utt, 'end');
+                                }
+
+                                // If speech queue has pending utterances, process next
+                                if (typeof window.__android_process_next_queue === 'function') {
+                                    window.__android_process_next_queue();
                                 }
 
                                 // Check if this was the last paragraph/sentence of the chapter or page
-                                if (Object.keys(window.__android_tts_utterances).length === 0) {
+                                if (Object.keys(window.__android_tts_utterances).length === 0 && (!window.__android_speech_queue || window.__android_speech_queue.length === 0)) {
                                     if (autoNextChapterDebounceTimer) clearTimeout(autoNextChapterDebounceTimer);
                                     autoNextChapterDebounceTimer = setTimeout(function() {
                                         // If after 2.0s no new sentence was queued, check if reader has reached the end of the chapter/page
@@ -660,6 +755,14 @@ class NovelTtsBridge(
                                             }
                                         }
                                     }, 2000);
+                                }
+                            } else if (event === 'onpause') {
+                                if (window.speechSynthesis) {
+                                    window.speechSynthesis.paused = true;
+                                    window.speechSynthesis.speaking = false;
+                                }
+                                if (utt && typeof utt.onpause === 'function') {
+                                    utt.onpause({ type: 'pause', utterance: utt });
                                 }
                             } else if (event === 'onerror') {
                                 if (utt) {
@@ -825,7 +928,45 @@ class NovelTtsBridge(
                         console.warn("SPA observer error", obsErr);
                     }
 
-                    // 4. Complete SpeechSynthesis Mock / Wrapper
+                    // 4. Complete SpeechSynthesis Mock / Wrapper with Queue
+                    window.__android_speech_queue = window.__android_speech_queue || [];
+                    let isProcessingQueue = false;
+
+                    window.__android_process_next_queue = function() {
+                        if (!window.__android_speech_queue || window.__android_speech_queue.length === 0) {
+                            isProcessingQueue = false;
+                            if (window.speechSynthesis) {
+                                window.speechSynthesis.speaking = false;
+                                window.speechSynthesis.pending = false;
+                            }
+                            return;
+                        }
+                        const item = window.__android_speech_queue.shift();
+                        isProcessingQueue = true;
+                        if (window.speechSynthesis) {
+                            window.speechSynthesis.speaking = true;
+                            window.speechSynthesis.pending = (window.__android_speech_queue.length > 0);
+                        }
+                        window.__android_active_utterance_id = item.id;
+                        window.__android_tts_utterances[item.id] = item.utterance;
+
+                        if (item.utterance.rate && item.utterance.rate !== 1.0 && window.AndroidTtsBridge && window.AndroidTtsBridge.setRate) {
+                            window.AndroidTtsBridge.setRate(item.utterance.rate);
+                        }
+                        if (item.utterance.pitch && item.utterance.pitch !== 1.0 && window.AndroidTtsBridge && window.AndroidTtsBridge.setPitch) {
+                            window.AndroidTtsBridge.setPitch(item.utterance.pitch);
+                        }
+                        if (item.utterance.voice && item.utterance.voice.name && window.AndroidTtsBridge && window.AndroidTtsBridge.setVoice) {
+                            window.AndroidTtsBridge.setVoice(item.utterance.voice.name);
+                        }
+
+                        if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.speakFromWeb === 'function') {
+                            window.AndroidTtsBridge.speakFromWeb(item.text, document.title || "อ่านนิยาย", item.id);
+                        } else if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.speak === 'function') {
+                            window.AndroidTtsBridge.speak(item.text, document.title || "อ่านนิยาย");
+                        }
+                    };
+
                     const synth = {
                         speaking: false,
                         paused: false,
@@ -840,15 +981,12 @@ class NovelTtsBridge(
                                 if (!utterance) return;
                                 const text = (typeof utterance === 'string') ? utterance : (utterance.text || '');
                                 if (!text || text.trim().length === 0) {
-                                    if (utterance && typeof utterance.onend === 'function') {
-                                        setTimeout(() => utterance.onend({ type: 'end', utterance: utterance }), 10);
-                                    }
+                                    setTimeout(() => dispatchUtteranceEvent(utterance, 'end'), 10);
                                     return;
                                 }
 
                                 const id = "utt_" + (++uttCounter);
                                 window.__android_tts_utterances[id] = utterance;
-                                window.__android_active_utterance_id = id;
 
                                 // Keep history of up to 500 lines for infinite previous rewinds
                                 if (!window.__android_tts_history) window.__android_tts_history = [];
@@ -857,32 +995,27 @@ class NovelTtsBridge(
                                     window.__android_tts_history.shift();
                                 }
 
-                                if (utterance.rate && utterance.rate !== 1.0 && window.AndroidTtsBridge && window.AndroidTtsBridge.setRate) {
-                                    window.AndroidTtsBridge.setRate(utterance.rate);
-                                }
-                                if (utterance.pitch && utterance.pitch !== 1.0 && window.AndroidTtsBridge && window.AndroidTtsBridge.setPitch) {
-                                    window.AndroidTtsBridge.setPitch(utterance.pitch);
-                                }
-                                if (utterance.voice && utterance.voice.name && window.AndroidTtsBridge && window.AndroidTtsBridge.setVoice) {
-                                    window.AndroidTtsBridge.setVoice(utterance.voice.name);
-                                }
+                                window.__android_speech_queue.push({ id: id, utterance: utterance, text: text });
+                                synth.pending = (window.__android_speech_queue.length > 1);
+                                synth.speaking = true;
 
-                                if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.speakFromWeb === 'function') {
-                                    window.AndroidTtsBridge.speakFromWeb(text, document.title || "อ่านนิยาย", id);
-                                } else if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.speak === 'function') {
-                                    window.AndroidTtsBridge.speak(text, document.title || "อ่านนิยาย");
+                                if (!isProcessingQueue) {
+                                    window.__android_process_next_queue();
                                 }
                             } catch(err) {
                                 console.error("[Bridge speak error]", err);
-                                if (utterance && typeof utterance.onerror === 'function') utterance.onerror({ error: err });
+                                if (utterance) dispatchUtteranceEvent(utterance, 'error');
                             }
                         },
                         cancel: function() {
                             try {
+                                window.__android_speech_queue.length = 0;
+                                isProcessingQueue = false;
                                 window.__android_tts_utterances = {};
                                 window.__android_active_utterance_id = null;
                                 synth.speaking = false;
                                 synth.paused = false;
+                                synth.pending = false;
                                 if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.stopFromWeb === 'function') {
                                     window.AndroidTtsBridge.stopFromWeb();
                                 }
@@ -980,7 +1113,9 @@ class NovelTtsBridge(
                             }, 50);
                         } catch(e) {}
                     }
+        """
 
+        private const val INJECTION_PART_2 = """
                     function notifyAudioPaused(audio) {
                         try {
                             if (window.speechSynthesis && window.speechSynthesis.speaking) return;
@@ -1073,7 +1208,8 @@ class NovelTtsBridge(
                     function simulateFullClick(el) {
                         if (!el) return false;
                         try {
-                            el.focus();
+                            const target = (typeof el.closest === 'function') ? (el.closest('button, [role="button"], a, div[onclick]') || el) : el;
+                            target.focus();
                             ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(evtType => {
                                 const evt = new MouseEvent(evtType, {
                                     bubbles: true,
@@ -1081,16 +1217,19 @@ class NovelTtsBridge(
                                     view: window,
                                     buttons: 1
                                 });
-                                el.dispatchEvent(evt);
+                                target.dispatchEvent(evt);
                             });
-                            if (typeof el.click === 'function') {
+                            if (typeof target.click === 'function') {
+                                target.click();
+                            }
+                            if (target !== el && typeof el.click === 'function') {
                                 el.click();
                             }
                             // If element is a link with href, navigate explicitly if default click didn't change location
-                            if (el.tagName === 'A' && el.href && !el.href.startsWith('javascript:void') && !el.href.startsWith('#')) {
+                            if (target.tagName === 'A' && target.href && !target.href.startsWith('javascript:void') && !target.href.startsWith('#')) {
                                 setTimeout(function() {
-                                    if (location.href !== el.href) {
-                                        window.location.href = el.href;
+                                    if (location.href !== target.href) {
+                                        window.location.href = target.href;
                                     }
                                 }, 50);
                             }
@@ -1108,36 +1247,48 @@ class NovelTtsBridge(
                     // 6. Unified Notification Control Actions for all engines (Device, Google, Microsoft)
                     window.__android_tts_resume = function() {
                         try {
+                            let didResumeSomething = false;
+
                             // 1. If web has mediaSession handler for play
                             if (window.__mediaSessionHandlers && typeof window.__mediaSessionHandlers['play'] === 'function') {
-                                try { window.__mediaSessionHandlers['play'](); } catch(e){}
+                                try { window.__mediaSessionHandlers['play'](); didResumeSomething = true; } catch(e){}
                             }
                             // 2. Resume HTML5 Audio elements
                             if (window.__active_html5_audio && window.__active_html5_audio.paused) {
                                 window.__active_html5_audio.play().catch(() => {});
+                                didResumeSomething = true;
                             }
                             document.querySelectorAll('audio').forEach(a => {
-                                if (a.paused && a.src) a.play().catch(() => {});
+                                if (a.paused && a.src) {
+                                    a.play().catch(() => {});
+                                    didResumeSomething = true;
+                                }
                             });
-                            // 3. Resume SpeechSynthesis
+                            // 3. Resume SpeechSynthesis state
                             if (window.speechSynthesis) {
                                 window.speechSynthesis.paused = false;
                                 window.speechSynthesis.speaking = true;
-                                try {
-                                    if (typeof window.speechSynthesis.resume === 'function') {
-                                        window.speechSynthesis.resume();
-                                    }
-                                } catch(e){}
                             }
                             if (window.__android_active_utterance_id) {
                                 const utt = (window.__android_tts_utterances || {})[window.__android_active_utterance_id];
-                                if (utt && typeof utt.onresume === 'function') {
-                                    utt.onresume({ type: 'resume', utterance: utt });
+                                if (utt) {
+                                    dispatchUtteranceEvent(utt, 'resume');
+                                    didResumeSomething = true;
                                 }
                             }
-                            // 4. Click web reader Play/Resume button if present
-                            const playBtn = document.querySelector('.tts-play, .btn-play, [data-action="play"], #play-button, .reader-play, .audio-play, .play-btn, .btn-read-play, [aria-label*="Play" i], [title*="เล่น" i], [title*="Play" i], [aria-label*="เล่น" i], .fa-play');
-                            if (playBtn) { simulateFullClick(playBtn); }
+
+                            // 4. Click web reader Play/Resume button to sync web reader UI to Playing state (||)
+                            const playBtn = document.querySelector(
+                                '.tts-play:not(.tts-pause):not(.pause):not(.active), ' +
+                                '.btn-play:not(.btn-pause):not(.pause):not(.active), ' +
+                                '[data-action="play"], #play-button:not(.paused), .reader-play:not(.active), ' +
+                                '.audio-play:not(.paused), .play-btn:not(.active), .btn-read-play, ' +
+                                '[aria-label*="Play" i], [title*="เล่น" i], [title*="Play" i], [aria-label*="เล่น" i], ' +
+                                '.fa-play, [data-action="tts-play"], #btn-tts-play'
+                            );
+                            if (playBtn && !playBtn.classList.contains('fa-pause') && !playBtn.classList.contains('pause') && !playBtn.classList.contains('active')) {
+                                simulateFullClick(playBtn);
+                            }
                             return true;
                         } catch(e) {
                             console.error("Resume error", e);
@@ -1156,27 +1307,26 @@ class NovelTtsBridge(
                                 window.__active_html5_audio.pause();
                             }
                             document.querySelectorAll('audio').forEach(a => {
-                                if (!a.paused) a.pause();
+                                if (!a.paused) {
+                                    a.pause();
+                                }
                             });
-                            // 3. Pause SpeechSynthesis
+                            // 3. Pause SpeechSynthesis (Keep utterances in queue for resuming)
                             if (window.speechSynthesis) {
                                 window.speechSynthesis.paused = true;
                                 window.speechSynthesis.speaking = false;
-                                try {
-                                    if (typeof window.speechSynthesis.pause === 'function') {
-                                        window.speechSynthesis.pause();
-                                    }
-                                } catch(e){}
                             }
                             if (window.__android_active_utterance_id) {
                                 const utt = (window.__android_tts_utterances || {})[window.__android_active_utterance_id];
-                                if (utt && typeof utt.onpause === 'function') {
-                                    utt.onpause({ type: 'pause', utterance: utt });
+                                if (utt) {
+                                    dispatchUtteranceEvent(utt, 'pause');
                                 }
                             }
-                            // 4. Click web reader Pause button if present
-                            const pauseBtn = document.querySelector('.tts-pause, [data-action="pause"], #pause-button, .reader-pause, .audio-pause, .pause-btn, [aria-label*="Pause" i], [title*="หยุด" i], [aria-label*="หยุด" i], .fa-pause');
-                            if (pauseBtn) { simulateFullClick(pauseBtn); }
+                            // 4. Click web reader Pause button to sync web UI state from || to ▶
+                            const pauseBtn = document.querySelector('.tts-pause, [data-action="pause"], #pause-button, .reader-pause.active, .audio-pause, .pause-btn, [aria-label*="Pause" i], [title*="หยุด" i], [aria-label*="หยุด" i], .fa-pause, .btn-pause, .tts-play.active, .btn-play.active');
+                            if (pauseBtn) {
+                                simulateFullClick(pauseBtn);
+                            }
                             return true;
                         } catch(e) {
                             console.error("Pause error", e);
@@ -1431,7 +1581,14 @@ class NovelTtsBridge(
                                                 var reader = new FileReader();
                                                 reader.onloadend = function() {
                                                     if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.saveBase64File === 'function') {
-                                                        window.AndroidTtsBridge.saveBase64File(reader.result, blob.type || 'text/plain', fname);
+                                                        var finalName = fname;
+                                                        if ((!downloadAttr || downloadAttr === '') && blob && blob.type) {
+                                                            var mime = blob.type.toLowerCase();
+                                                            if (mime.includes('json')) finalName = 'novel_' + Date.now() + '.json';
+                                                            else if (mime.includes('epub')) finalName = 'novel_' + Date.now() + '.epub';
+                                                            else if (mime.includes('pdf')) finalName = 'novel_' + Date.now() + '.pdf';
+                                                        }
+                                                        window.AndroidTtsBridge.saveBase64File(reader.result, (blob && blob.type) || 'text/plain', finalName);
                                                     }
                                                 };
                                                 reader.readAsDataURL(blob);
@@ -1465,6 +1622,8 @@ class NovelTtsBridge(
                 }
             })();
         """
+
+        val INJECTION_SCRIPT = INJECTION_PART_1 + INJECTION_PART_2
 
         /**
          * Google Chrome-style Webpage Translation Injection Engine

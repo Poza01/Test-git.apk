@@ -11,6 +11,7 @@ import android.view.ViewGroup
 import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
 import android.webkit.URLUtil
+import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
@@ -18,6 +19,8 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -44,6 +47,8 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.BatteryAlert
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.ElectricBolt
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Language
@@ -93,8 +98,10 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.bridge.NovelTtsBridge
 import com.example.data.NovelPreferences
+import com.example.data.download.DownloadHelper
 import com.example.service.TtsForegroundService
 import com.example.ui.components.ChromeTranslateBar
+import com.example.ui.components.DownloadsSheet
 import com.example.ui.theme.AmberPrimary
 import com.example.ui.theme.AmberSecondary
 import com.example.ui.theme.DarkBorder
@@ -129,8 +136,39 @@ fun WebCompanionScreen(
     var isAutoTranslate by remember { mutableStateOf(prefs.isAutoTranslate) }
 
     var showChromeMenu by remember { mutableStateOf(false) }
+    var showDownloadsSheet by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        DownloadHelper.init(context)
+    }
 
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
+    var filePathCallback by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
+
+    // File Chooser Launcher supporting .json, .txt, epub, and all types for Web Import / Library Restore
+    val fileChooserLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val callback = filePathCallback
+        filePathCallback = null
+        if (callback == null) return@rememberLauncherForActivityResult
+
+        val dataIntent = result.data
+        if (result.resultCode == android.app.Activity.RESULT_OK && dataIntent != null) {
+            val clipData = dataIntent.clipData
+            val dataUri = dataIntent.data
+            val results: Array<Uri>? = when {
+                clipData != null && clipData.itemCount > 0 -> {
+                    Array(clipData.itemCount) { i -> clipData.getItemAt(i).uri }
+                }
+                dataUri != null -> arrayOf(dataUri)
+                else -> null
+            }
+            callback.onReceiveValue(results)
+        } else {
+            callback.onReceiveValue(null)
+        }
+    }
 
     val currentService by rememberUpdatedState(service)
     val bridge = remember {
@@ -181,9 +219,11 @@ fun WebCompanionScreen(
         }
     }
 
-    // Handle back button for menu dismissal or web navigation history
-    BackHandler(enabled = showChromeMenu || canGoBack) {
-        if (showChromeMenu) {
+    // Handle back button for sheet dismissal, menu dismissal or web navigation history
+    BackHandler(enabled = showDownloadsSheet || showChromeMenu || canGoBack) {
+        if (showDownloadsSheet) {
+            showDownloadsSheet = false
+        } else if (showChromeMenu) {
             showChromeMenu = false
         } else if (canGoBack) {
             webViewInstance?.goBack()
@@ -386,6 +426,21 @@ fun WebCompanionScreen(
                                 Icon(
                                     imageVector = Icons.Default.Home,
                                     contentDescription = "หน้าแรกนิยาย",
+                                    tint = AmberPrimary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+
+                            IconButton(
+                                onClick = {
+                                    showChromeMenu = false
+                                    showDownloadsSheet = true
+                                },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.DownloadDone,
+                                    contentDescription = "ดาวน์โหลด",
                                     tint = AmberPrimary,
                                     modifier = Modifier.size(18.dp)
                                 )
@@ -641,7 +696,40 @@ fun WebCompanionScreen(
 
                         HorizontalDivider(color = Color(0xFF3C4043), thickness = 1.dp)
 
-                        // 6. ตั้งค่าเสียงอ่าน (TTS Voice Settings)
+                        // 6. ดาวน์โหลด (Google Chrome Downloads)
+                        DropdownMenuItem(
+                            text = {
+                                Column {
+                                    Text(
+                                        text = "ดาวน์โหลด",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Color.White
+                                    )
+                                    Text(
+                                        text = "ดูและจัดการไฟล์ที่ดาวน์โหลดไว้",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color(0xFF9CA3AF),
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.DownloadDone,
+                                    contentDescription = "ดาวน์โหลด",
+                                    tint = AmberPrimary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            },
+                            onClick = {
+                                showChromeMenu = false
+                                showDownloadsSheet = true
+                            },
+                            modifier = Modifier.testTag("chrome_menu_downloads")
+                        )
+
+                        // 7. ตั้งค่าเสียงอ่าน (TTS Voice Settings)
                         DropdownMenuItem(
                             text = {
                                 Column {
@@ -774,9 +862,6 @@ fun WebCompanionScreen(
                             ViewGroup.LayoutParams.MATCH_PARENT
                         )
 
-                        // Use hardware rendering for smooth 60fps scrolling and lag-free novel reading
-                        setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
-
                         // Enable cookies and 3rd party cookies for SPA/Auth sites
                         val webViewInstanceRef = this
                         android.webkit.CookieManager.getInstance().apply {
@@ -793,8 +878,8 @@ fun WebCompanionScreen(
                             loadWithOverviewMode = true
                             builtInZoomControls = true
                             displayZoomControls = false
-                            allowFileAccess = false
-                            allowContentAccess = false
+                            allowFileAccess = true
+                            allowContentAccess = true
                             javaScriptCanOpenWindowsAutomatically = false
                             setSupportMultipleWindows(false)
                             cacheMode = WebSettings.LOAD_DEFAULT
@@ -824,10 +909,19 @@ fun WebCompanionScreen(
                                                     var reader = new FileReader();
                                                     reader.onloadend = function() {
                                                         if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.saveBase64File === 'function') {
+                                                            var inferredExt = '.txt';
+                                                            var mime = (blob.type || '${mimetype ?: ""}').toLowerCase();
+                                                            if (mime.includes('json')) inferredExt = '.json';
+                                                            else if (mime.includes('epub')) inferredExt = '.epub';
+                                                            else if (mime.includes('pdf')) inferredExt = '.pdf';
+                                                            var suggestedName = '${URLUtil.guessFileName(url, contentDisposition, mimetype)}';
+                                                            if (!suggestedName || suggestedName.endsWith('.bin')) {
+                                                                suggestedName = 'novel_' + Date.now() + inferredExt;
+                                                            }
                                                             window.AndroidTtsBridge.saveBase64File(
                                                                 reader.result,
                                                                 blob.type || '${mimetype ?: "text/plain"}',
-                                                                'novel_${System.currentTimeMillis()}.txt'
+                                                                suggestedName
                                                             );
                                                         }
                                                     };
@@ -841,50 +935,20 @@ fun WebCompanionScreen(
                                     return@setDownloadListener
                                 }
 
-                                // 1. Prompt ROM / System Chooser to open in Google Chrome or User's preferred browser
-                                val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
-                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                }
-                                val chooser = Intent.createChooser(browserIntent, "เลือกเบราว์เซอร์สำหรับดาวน์โหลดไฟล์...")
-                                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                ctx.startActivity(chooser)
-                                Toast.makeText(ctx, "กำลังเปิดเบราว์เซอร์เพื่อดาวน์โหลด...", Toast.LENGTH_SHORT).show()
-                            } catch (e: Exception) {
-                                // Fallback to DownloadManager if no external browser found
-                                try {
-                                    val request = DownloadManager.Request(Uri.parse(url)).apply {
-                                        val guessedName = URLUtil.guessFileName(url, contentDisposition, mimetype)
-                                        val fileName = if (guessedName.endsWith(".bin", ignoreCase = true) && (url.contains(".txt") || mimetype.contains("text"))) {
-                                            guessedName.substringBeforeLast(".") + ".txt"
-                                        } else {
-                                            guessedName
-                                        }
-
-                                        val cookies = CookieManager.getInstance().getCookie(url)
-                                        if (!cookies.isNullOrBlank()) {
-                                            addRequestHeader("Cookie", cookies)
-                                        }
-                                        if (userAgent.isNotBlank()) {
-                                            addRequestHeader("User-Agent", userAgent)
-                                        }
-                                        addRequestHeader("Referer", currentUrl)
-
-                                        setTitle(fileName)
-                                        setDescription("กำลังดาวน์โหลดไฟล์...")
-                                        setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                                        setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
-                                        if (mimetype.isNotBlank()) {
-                                            setMimeType(mimetype)
-                                        }
+                                // In-App Download Manager (Google Chrome Style)
+                                DownloadHelper.downloadFromWeb(
+                                    context = ctx,
+                                    url = url,
+                                    userAgent = userAgent,
+                                    contentDisposition = contentDisposition,
+                                    mimetype = mimetype,
+                                    onDownloadStarted = { fileName ->
+                                        // Trigger download refresh
                                     }
-
-                                    val dm = ctx.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager
-                                    dm?.enqueue(request)
-                                    Toast.makeText(ctx, "กำลังดาวน์โหลดไฟล์...", Toast.LENGTH_SHORT).show()
-                                } catch (e2: Exception) {
-                                    e2.printStackTrace()
-                                    Toast.makeText(ctx, "เกิดข้อผิดพลาด: ${e2.localizedMessage}", Toast.LENGTH_LONG).show()
-                                }
+                                )
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                                Toast.makeText(ctx, "เกิดข้อผิดพลาดในการดาวน์โหลด: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
                             }
                         }
 
@@ -1078,6 +1142,63 @@ fun WebCompanionScreen(
                             override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
                                 return true
                             }
+
+                            override fun onShowFileChooser(
+                                webView: WebView?,
+                                filePathCallbackParam: ValueCallback<Array<Uri>>?,
+                                fileChooserParams: FileChooserParams?
+                            ): Boolean {
+                                // Cancel any pending previous callback to avoid hanging webview state
+                                filePathCallback?.onReceiveValue(null)
+                                filePathCallback = filePathCallbackParam
+
+                                try {
+                                    val intent = fileChooserParams?.createIntent() ?: Intent(Intent.ACTION_GET_CONTENT).apply {
+                                        addCategory(Intent.CATEGORY_OPENABLE)
+                                        type = "*/*"
+                                    }
+
+                                    // If accept types include json, text, or multiple types, ensure intent handles them properly
+                                    val acceptTypes = fileChooserParams?.acceptTypes?.filter { it.isNotBlank() }
+                                    if (!acceptTypes.isNullOrEmpty()) {
+                                        if (acceptTypes.size == 1) {
+                                            val type = acceptTypes[0]
+                                            intent.type = when {
+                                                type.equals(".json", ignoreCase = true) -> "application/json"
+                                                type.equals(".txt", ignoreCase = true) -> "text/plain"
+                                                type.startsWith(".") -> "*/*"
+                                                else -> type
+                                            }
+                                        } else {
+                                            intent.type = "*/*"
+                                            val mimeArray = acceptTypes.map { type ->
+                                                when {
+                                                    type.equals(".json", ignoreCase = true) -> "application/json"
+                                                    type.equals(".txt", ignoreCase = true) -> "text/plain"
+                                                    else -> type
+                                                }
+                                            }.toTypedArray()
+                                            intent.putExtra(Intent.EXTRA_MIME_TYPES, mimeArray)
+                                        }
+                                    } else if (intent.type.isNullOrBlank()) {
+                                        intent.type = "*/*"
+                                    }
+
+                                    if (fileChooserParams?.mode == FileChooserParams.MODE_OPEN_MULTIPLE) {
+                                        intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+                                    }
+
+                                    val chooserTitle = fileChooserParams?.title ?: "เลือกไฟล์นำเข้า (.json, .txt, ไฟล์นิยาย)..."
+                                    val chooserIntent = Intent.createChooser(intent, chooserTitle)
+                                    fileChooserLauncher.launch(chooserIntent)
+                                    return true
+                                } catch (e: Exception) {
+                                    filePathCallback?.onReceiveValue(null)
+                                    filePathCallback = null
+                                    Toast.makeText(ctx, "ไม่สามารถเปิดตัวเลือกไฟล์ได้: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+                                    return false
+                                }
+                            }
                         }
 
                         loadUrl(currentUrl)
@@ -1092,5 +1213,14 @@ fun WebCompanionScreen(
                     .testTag("novel_webview")
             )
         }
+    }
+
+    if (showDownloadsSheet) {
+        DownloadsSheet(
+            onDismiss = { showDownloadsSheet = false },
+            onOpenInNovelReader = { text, title ->
+                service?.playSingleText(text, title)
+            }
+        )
     }
 }

@@ -87,12 +87,19 @@ class MainActivity : ComponentActivity() {
 
     private fun ensureWebViewCacheDirExists() {
         try {
-            val codeCacheDir = java.io.File(cacheDir, "WebView/Default/HTTP Cache/Code Cache/js")
-            val wasmCacheDir = java.io.File(cacheDir, "WebView/Default/HTTP Cache/Code Cache/wasm")
-            codeCacheDir.mkdirs()
-            wasmCacheDir.mkdirs()
+            // Ensure Chromium cache directories exist to prevent simple_file_enumerator warnings
+            val webViewCache = java.io.File(cacheDir, "WebView/Default/HTTP Cache")
+            java.io.File(webViewCache, "Code Cache/js").mkdirs()
+            java.io.File(webViewCache, "Code Cache/wasm").mkdirs()
+            java.io.File(webViewCache, "index-dir").mkdirs()
+
+            // Also ensure in app_webview directory if present
+            val appWebview = java.io.File(dataDir, "app_webview/Default/HTTP Cache")
+            java.io.File(appWebview, "Code Cache/js").mkdirs()
+            java.io.File(appWebview, "Code Cache/wasm").mkdirs()
+            java.io.File(appWebview, "index-dir").mkdirs()
         } catch (e: Exception) {
-            e.printStackTrace()
+            // Safe ignore
         }
     }
 

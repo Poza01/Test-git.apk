@@ -417,6 +417,15 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
         com.example.bridge.NovelTtsBridge.notifyPauseFromService()
     }
 
+    fun togglePlayPause() {
+        val currentlyPlaying = _playbackState.value.isPlaying || (tts?.isSpeaking == true)
+        if (currentlyPlaying) {
+            pause()
+        } else {
+            resume()
+        }
+    }
+
     fun resume() {
         isUserPaused = false
         val state = _playbackState.value
@@ -429,10 +438,27 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
             speakParagraphInternal(state.activeParagraphIndex)
         } else if (state.paragraphs.isNotEmpty()) {
             speakParagraphInternal(0)
-        } else if (state.currentText.isNotBlank()) {
+        } else if (isWebAudioPlaying) {
+            // Web Audio (HTML5 <audio>): resume via WebView controls
+            com.example.bridge.NovelTtsBridge.notifyPlayResumeFromService()
+        } else if (state.currentText.isNotBlank() && state.currentText != "กำลังเล่นเสียง...") {
             val uttId = currentWebUtteranceId ?: "0"
             val utteranceId = "web_utt_$uttId"
             tts?.speak(state.currentText, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+            com.example.bridge.NovelTtsBridge.notifyPlayResumeFromService()
+        } else if (webSpeechHistory.isNotEmpty()) {
+            val lastItem = webSpeechHistory.getOrNull(webHistoryIndex) ?: webSpeechHistory.last()
+            currentWebUtteranceId = lastItem.utteranceId
+            val utteranceId = "web_utt_${lastItem.utteranceId}"
+            _playbackState.update {
+                it.copy(
+                    chapterTitle = lastItem.title.ifBlank { "อ่านนิยายเว็บ" },
+                    currentText = lastItem.text,
+                    isPlaying = true,
+                    isPaused = false
+                )
+            }
+            tts?.speak(lastItem.text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
             com.example.bridge.NovelTtsBridge.notifyPlayResumeFromService()
         } else {
             // Web Audio (Google / Microsoft) or general web reader
@@ -612,7 +638,7 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
 
         // Play/Pause toggle intent
         val playPauseIntent = Intent(this, TtsForegroundService::class.java).apply {
-            action = if (state.isPlaying) ACTION_PAUSE else ACTION_PLAY
+            action = ACTION_TOGGLE_PLAY_PAUSE
         }
         val pendingPlayPause = PendingIntent.getService(this, 2, playPauseIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
@@ -683,6 +709,7 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
+            ACTION_TOGGLE_PLAY_PAUSE -> togglePlayPause()
             ACTION_PLAY -> resume()
             ACTION_PAUSE -> pause()
             ACTION_PREV -> skipPrevious()
@@ -713,6 +740,7 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
         const val CHANNEL_ID = "novel_tts_playback_channel"
         const val NOTIFICATION_ID = 10086
 
+        const val ACTION_TOGGLE_PLAY_PAUSE = "com.example.noveltts.ACTION_TOGGLE_PLAY_PAUSE"
         const val ACTION_PLAY = "com.example.noveltts.ACTION_PLAY"
         const val ACTION_PAUSE = "com.example.noveltts.ACTION_PAUSE"
         const val ACTION_PREV = "com.example.noveltts.ACTION_PREV"
