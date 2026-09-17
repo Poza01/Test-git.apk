@@ -99,10 +99,31 @@ class NovelTtsBridge(
         mainHandler.post {
             getWebView()?.evaluateJavascript("""
                 (function() {
-                    if (window.__android_tts_pause && typeof window.__android_tts_pause === 'function') {
-                        return window.__android_tts_pause();
-                    }
+                    try {
+                        sessionStorage.removeItem('__novel_auto_play_next');
+                        if (window.__android_tts_pause && typeof window.__android_tts_pause === 'function') {
+                            return window.__android_tts_pause();
+                        }
+                    } catch(e){}
                     return false;
+                })();
+            """.trimIndent(), null)
+        }
+    }
+
+    fun onStopFromNotification() {
+        mainHandler.post {
+            getWebView()?.evaluateJavascript("""
+                (function() {
+                    try {
+                        sessionStorage.removeItem('__novel_auto_play_next');
+                        if (window.__android_tts_pause && typeof window.__android_tts_pause === 'function') {
+                            window.__android_tts_pause();
+                        }
+                        if (window.speechSynthesis && typeof window.speechSynthesis.cancel === 'function') {
+                            window.speechSynthesis.cancel();
+                        }
+                    } catch(e){}
                 })();
             """.trimIndent(), null)
         }
@@ -431,6 +452,10 @@ class NovelTtsBridge(
 
         fun notifyPauseFromService() {
             activeBridge?.onPauseFromNotification()
+        }
+
+        fun notifyStopFromService() {
+            activeBridge?.onStopFromNotification()
         }
 
         /**

@@ -51,6 +51,8 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
     private var currentWebUtteranceId: String? = null
     private var isWebAudioPlaying: Boolean = false
     private var webIdleJob: kotlinx.coroutines.Job? = null
+    @Volatile
+    private var isUserPaused: Boolean = false
 
     data class WebSpeechHistoryItem(val text: String, val title: String, val utteranceId: String)
     private val webSpeechHistory = mutableListOf<WebSpeechHistoryItem>()
@@ -144,6 +146,7 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
         tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(utteranceId: String?) {
                 serviceScope.launch {
+                    isUserPaused = false
                     _playbackState.update { it.copy(isPlaying = true, isPaused = false) }
                     updateForegroundNotification()
                     if (!utteranceId.isNullOrBlank()) {
@@ -154,6 +157,10 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
 
             override fun onDone(utteranceId: String?) {
                 serviceScope.launch {
+                    if (isUserPaused || _playbackState.value.isPaused) {
+                        Log.d(TAG, "Ignoring onDone because user is paused: $utteranceId")
+                        return@launch
+                    }
                     if (!utteranceId.isNullOrBlank()) {
                         onUtteranceEvent?.invoke("ondone", utteranceId)
                     }
@@ -195,7 +202,16 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
             }
 
             override fun onError(utteranceId: String?) {
-                Log.w(TAG, "Utterance error: $utteranceId, currentWebUtteranceId=$currentWebUtteranceId")
+                Log.w(TAG, "Utterance error: $utteranceId, currentWebUtteranceId=$currentWebUtteranceId, isUserPaused=$isUserPaused")
+                // If the error was triggered by pausing the playback (tts.stop()), do NOT treat as fatal error!
+                if (isUserPaused || _playbackState.value.isPaused) {
+                    Log.d(TAG, "Ignoring onError for paused utterance: $utteranceId")
+                    if (!utteranceId.isNullOrBlank()) {
+                        onUtteranceEvent?.invoke("onpause", utteranceId)
+                    }
+                    return
+                }
+
                 if (utteranceId?.startsWith("web_utt_") == true) {
                     val expectedId = "web_utt_$currentWebUtteranceId"
                     if (utteranceId != expectedId) {
@@ -218,7 +234,12 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
             }
 
             override fun onStop(utteranceId: String?, interrupted: Boolean) {
-                Log.d(TAG, "Utterance stopped/interrupted: $utteranceId, interrupted=$interrupted")
+                Log.d(TAG, "Utterance stopped/interrupted: $utteranceId, interrupted=$interrupted, isUserPaused=$isUserPaused")
+                if (isUserPaused || _playbackState.value.isPaused) {
+                    if (!utteranceId.isNullOrBlank()) {
+                        onUtteranceEvent?.invoke("onpause", utteranceId)
+                    }
+                }
             }
         })
     }
@@ -386,6 +407,7 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
     }
 
     fun pause() {
+        isUserPaused = true
         webIdleJob?.cancel()
         if (tts?.isSpeaking == true) {
             tts?.stop()
@@ -396,6 +418,7 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
     }
 
     fun resume() {
+        isUserPaused = false
         val state = _playbackState.value
         webIdleJob?.cancel()
         startAsForegroundService()
@@ -406,19 +429,19 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
             speakParagraphInternal(state.activeParagraphIndex)
         } else if (state.paragraphs.isNotEmpty()) {
             speakParagraphInternal(0)
-        } else if (!currentWebUtteranceId.isNullOrBlank() && state.currentText.isNotBlank()) {
-            // Keep the exact same utterance ID so web reader's onend callback is triggered!
+        } else if (state.currentText.isNotBlank()) {
             val uttId = currentWebUtteranceId ?: "0"
             val utteranceId = "web_utt_$uttId"
             tts?.speak(state.currentText, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
             com.example.bridge.NovelTtsBridge.notifyPlayResumeFromService()
         } else {
-            // Web Audio (Google / Microsoft)
+            // Web Audio (Google / Microsoft) or general web reader
             com.example.bridge.NovelTtsBridge.notifyPlayResumeFromService()
         }
     }
 
     fun pauseFromWeb() {
+        isUserPaused = true
         webIdleJob?.cancel()
         if (tts?.isSpeaking == true) {
             tts?.stop()
@@ -428,6 +451,7 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
     }
 
     fun stopFromWeb() {
+        isUserPaused = false
         webIdleJob?.cancel()
         tts?.stop()
         _playbackState.update {
@@ -441,6 +465,7 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
     }
 
     fun stop() {
+        isUserPaused = false
         webIdleJob?.cancel()
         tts?.stop()
         _playbackState.update {
@@ -453,7 +478,7 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
             )
         }
         updateForegroundNotification()
-        com.example.bridge.NovelTtsBridge.notifyPauseFromService()
+        com.example.bridge.NovelTtsBridge.notifyStopFromService()
     }
 
     fun skipNext() {

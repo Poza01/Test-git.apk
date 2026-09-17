@@ -946,15 +946,26 @@ fun WebCompanionScreen(
                                     }, 600)
                                 }
 
-                                // Auto-continue reading next/prev chapter when triggered by background or user navigation
-                                // Enhanced with persistent polling interval to ensure slow or background-throttled pages never get stuck
+                                // Auto-continue reading next/prev chapter ONLY when triggered by explicit auto chapter hopper within last 15 seconds
                                 val autoPlayScript = """
                                     (function() {
                                         try {
-                                            if (sessionStorage.getItem('__novel_auto_play_next') !== 'true') return;
+                                            var autoPlayVal = sessionStorage.getItem('__novel_auto_play_next');
+                                            if (!autoPlayVal) return;
+
+                                            // If timestamp is provided, ensure it was initiated within the last 15 seconds
+                                            var ts = parseInt(autoPlayVal, 10);
+                                            if (!isNaN(ts)) {
+                                                var now = Date.now();
+                                                if (now - ts > 15000 || now < ts - 1000) {
+                                                    sessionStorage.removeItem('__novel_auto_play_next');
+                                                    return;
+                                                }
+                                            }
 
                                             function tryClickPlay() {
-                                                if (sessionStorage.getItem('__novel_auto_play_next') !== 'true') return true;
+                                                var currentVal = sessionStorage.getItem('__novel_auto_play_next');
+                                                if (!currentVal) return true;
 
                                                 const playSelectors = [
                                                     '.btn-read', '.btn-play', '#btn-tts', '#read-novel', '[data-action="auto-read"]',
@@ -1006,12 +1017,12 @@ fun WebCompanionScreen(
                                             // Attempt immediately
                                             if (tryClickPlay()) return;
 
-                                            // If not found yet (e.g. dynamic rendering in background), poll every 500ms up to 20 times (10 seconds)
+                                            // If not found yet (e.g. dynamic rendering in background), poll every 500ms up to 12 times (6 seconds)
                                             if (window.__novel_auto_play_timer) clearInterval(window.__novel_auto_play_timer);
                                             var count = 0;
                                             window.__novel_auto_play_timer = setInterval(function() {
                                                 count++;
-                                                if (tryClickPlay() || count > 20) {
+                                                if (tryClickPlay() || count > 12) {
                                                     clearInterval(window.__novel_auto_play_timer);
                                                     window.__novel_auto_play_timer = null;
                                                 }
