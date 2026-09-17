@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/notif_root"
+    android:layout_width="match_parent"
+    android:layout_height="64dp"
+    android:orientation="vertical"
+    android:background="@drawable/bg_notif_card"
+    android:paddingLeft="12dp"
+    android:paddingRight="12dp"
+    android:paddingTop="6dp"
+    android:paddingBottom="6dp"
+    android:gravity="center_vertical">
+
+    <!-- Top mini title row -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="3dp">
+
+        <TextView
+            android:id="@+id/notif_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="ระบบอ่านนิยายเสียง"
+            android:textColor="#F3F4F6"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:singleLine="true"
+            android:ellipsize="end" />
+
+        <TextView
+            android:id="@+id/notif_subtext"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="กำลังอ่าน"
+            android:textColor="#5EEAD4"
+            android:textSize="10sp"
+            android:layout_marginLeft="6dp" />
+    </LinearLayout>
+
+    <!-- Main Player Control Row matching screenshot directly -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <!-- Speaker / Megaphone Icon Badge (Left) -->
+        <ImageView
+            android:id="@+id/btn_notif_speaker"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
+            android:clickable="true"
+            android:focusable="false"
+            android:background="@drawable/bg_notif_circle_teal"
+            android:src="@drawable/ic_speaker_megaphone"
+            android:scaleType="centerInside"
+            android:contentDescription="Speaker" />
+
+        <!-- Previous Button (Grey Circle with <<) -->
+        <ImageView
+            android:id="@+id/btn_notif_prev"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
+            android:layout_marginLeft="12dp"
+            android:clickable="true"
+            android:focusable="false"
+            android:background="@drawable/bg_notif_circle_grey"
+            android:src="@drawable/ic_notif_prev"
+            android:scaleType="centerInside"
+            android:contentDescription="ย้อนบรรทัด" />
+
+        <!-- Play/Pause Button (Grey Circle with || or >) -->
+        <ImageView
+            android:id="@+id/btn_notif_play_pause"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
+            android:layout_marginLeft="10dp"
+            android:clickable="true"
+            android:focusable="false"
+            android:background="@drawable/bg_notif_circle_grey"
+            android:src="@drawable/ic_notif_pause"
+            android:scaleType="centerInside"
+            android:contentDescription="เล่นหรือพัก" />
+
+        <!-- Next Button (Grey Circle with >>) -->
+        <ImageView
+            android:id="@+id/btn_notif_next"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
+            android:layout_marginLeft="10dp"
+            android:clickable="true"
+            android:focusable="false"
+            android:background="@drawable/bg_notif_circle_grey"
+            android:src="@drawable/ic_notif_next"
+            android:scaleType="centerInside"
+            android:contentDescription="บรรทัดถัดไป" />
+
+    </LinearLayout>
+</LinearLayout>

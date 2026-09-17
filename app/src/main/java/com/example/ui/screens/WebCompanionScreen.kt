@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -40,21 +41,31 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.material.icons.filled.AutoFixHigh
+import androidx.compose.material.icons.filled.BatteryAlert
 import androidx.compose.material.icons.filled.ElectricBolt
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MenuOpen
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -96,6 +107,7 @@ fun WebCompanionScreen(
     isBottomNavVisible: Boolean = false,
     onToggleBottomNav: () -> Unit = {},
     onNavigateToBackgroundSettings: () -> Unit = {},
+    onNavigateToVoiceSettings: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -114,6 +126,8 @@ fun WebCompanionScreen(
     var isTranslating by remember { mutableStateOf(false) }
     var targetLang by remember { mutableStateOf(prefs.targetLanguage) }
     var isAutoTranslate by remember { mutableStateOf(prefs.isAutoTranslate) }
+
+    var showChromeMenu by remember { mutableStateOf(false) }
 
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
 
@@ -172,7 +186,7 @@ fun WebCompanionScreen(
             .background(Color(0xFF0F0F0F))
             .testTag("web_companion_screen")
     ) {
-        // Top Omnibox & Web Navigation Bar
+        // Top Omnibox & Web Navigation Bar (Google Chrome Style)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -192,19 +206,6 @@ fun WebCompanionScreen(
                         imageVector = Icons.Default.ArrowBack,
                         contentDescription = "ย้อนกลับ",
                         tint = if (canGoBack) Color.White else Color(0xFF555555),
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-
-                IconButton(
-                    onClick = { webViewInstance?.goForward() },
-                    enabled = canGoForward,
-                    modifier = Modifier.size(36.dp).testTag("web_forward_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.ArrowForward,
-                        contentDescription = "ไปข้างหน้า",
-                        tint = if (canGoForward) Color.White else Color(0xFF555555),
                         modifier = Modifier.size(18.dp)
                     )
                 }
@@ -293,121 +294,406 @@ fun WebCompanionScreen(
                         .height(44.dp)
                         .testTag("web_url_input")
                 )
-            }
 
-            // Quick Native Action Bar: Page status + Google Translate button + In-App Player toggle
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 6.dp, start = 4.dp, end = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(
-                    modifier = Modifier.weight(1f),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(8.dp)
-                            .clip(CircleShape)
-                            .background(if (isLoading) AmberPrimary else Color(0xFF10B981))
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = if (isLoading) "กำลังเชื่อมต่อ..." else pageTitle,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontSize = 11.sp,
-                        color = Color(0xFFD1D5DB),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
+                Spacer(modifier = Modifier.width(4.dp))
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    // Toggle Bottom 3-Menu Bar (ซ่อน/เปิด 3 เมนูล่าง)
-                    Box(
+                // Chrome 3-Dots Menu Button (⋮)
+                Box {
+                    IconButton(
+                        onClick = { showChromeMenu = !showChromeMenu },
                         modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(if (isBottomNavVisible) Color(0xFF222222) else AmberPrimary.copy(alpha = 0.2f))
-                            .border(
-                                width = 1.dp,
-                                color = if (isBottomNavVisible) DarkBorder else AmberPrimary,
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                            .clickable {
-                                onToggleBottomNav()
-                            }
-                            .padding(horizontal = 8.dp, vertical = 5.dp)
-                            .testTag("toggle_bottom_nav_button"),
-                        contentAlignment = Alignment.Center
+                            .size(38.dp)
+                            .testTag("chrome_menu_button")
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = if (isBottomNavVisible) Icons.Default.MenuOpen else Icons.Default.Menu,
-                                contentDescription = if (isBottomNavVisible) "ซ่อน 3 เมนูล่าง" else "แสดง 3 เมนูล่าง",
-                                tint = if (isBottomNavVisible) Color(0xFFD1D5DB) else AmberPrimary,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = if (isBottomNavVisible) "ซ่อนเมนู" else "แสดงเมนู",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.SemiBold,
-                                color = if (isBottomNavVisible) Color(0xFFD1D5DB) else AmberPrimary,
-                                fontSize = 11.sp
-                            )
-                        }
+                        Icon(
+                            imageVector = Icons.Default.MoreVert,
+                            contentDescription = "เมนูเพิ่มเติมแบบ Chrome",
+                            tint = if (isTranslated) Color(0xFF38BDF8) else Color.White,
+                            modifier = Modifier.size(22.dp)
+                        )
                     }
 
-                    Spacer(modifier = Modifier.width(6.dp))
-
-                    // Google Translate Toggle Button
-                    Box(
+                    // Chrome Dropdown Submenu
+                    DropdownMenu(
+                        expanded = showChromeMenu,
+                        onDismissRequest = { showChromeMenu = false },
                         modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(
-                                if (isTranslateBarVisible || isTranslated) {
-                                    Brush.horizontalGradient(listOf(Color(0xFF0284C7), Color(0xFF0EA5E9)))
-                                } else {
-                                    Brush.horizontalGradient(listOf(Color(0xFF222222), Color(0xFF222222)))
+                            .background(Color(0xFF202124))
+                            .border(1.dp, Color(0xFF3C4043), RoundedCornerShape(14.dp))
+                            .widthIn(min = 250.dp, max = 300.dp)
+                            .testTag("chrome_overflow_menu")
+                    ) {
+                        // 1. Top Quick Action Bar (Chrome style icon row: Forward, Refresh, Home, External)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceAround,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            IconButton(
+                                onClick = {
+                                    showChromeMenu = false
+                                    webViewInstance?.goForward()
+                                },
+                                enabled = canGoForward,
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ArrowForward,
+                                    contentDescription = "ไปข้างหน้า",
+                                    tint = if (canGoForward) Color.White else Color(0xFF555555),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+
+                            IconButton(
+                                onClick = {
+                                    showChromeMenu = false
+                                    webViewInstance?.reload()
+                                },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = "รีโหลด",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+
+                            IconButton(
+                                onClick = {
+                                    showChromeMenu = false
+                                    val homeUrl = "https://plaaniyaythai-ai.ai.studio/"
+                                    inputUrl = homeUrl
+                                    currentUrl = homeUrl
+                                    prefs.webUrl = homeUrl
+                                    webViewInstance?.loadUrl(homeUrl)
+                                },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Home,
+                                    contentDescription = "หน้าแรกนิยาย",
+                                    tint = AmberPrimary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+
+                            IconButton(
+                                onClick = {
+                                    showChromeMenu = false
+                                    try {
+                                        val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(currentUrl))
+                                        context.startActivity(browserIntent)
+                                    } catch (e: Exception) {
+                                        Toast.makeText(context, "ไม่สามารถเปิดเบราว์เซอร์ได้", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                                    contentDescription = "เปิดในเบราว์เซอร์",
+                                    tint = Color(0xFF9CA3AF),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+
+                        HorizontalDivider(color = Color(0xFF3C4043), thickness = 1.dp)
+
+                        // 2. แปลภาษา (Google Translate) - Chrome "Translate..."
+                        DropdownMenuItem(
+                            text = {
+                                Column {
+                                    Text(
+                                        text = if (isTranslating) "กำลังแปลภาษา..." else if (isTranslated) "แสดงต้นฉบับ (คืนค่า)" else "แปลภาษา (Google Translate)",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (isTranslated) Color(0xFF38BDF8) else Color.White
+                                    )
+                                    Text(
+                                        text = if (isTranslated) "หน้าเว็บแปลเป็นไทยแล้ว (คลิกเพื่อดูต้นฉบับ)" else "แปลเนื้อหาหน้าเว็บเป็นภาษาไทย",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color(0xFF9CA3AF),
+                                        fontSize = 11.sp
+                                    )
                                 }
-                            )
-                            .border(
-                                width = 1.dp,
-                                color = if (isTranslateBarVisible || isTranslated) Color(0xFF38BDF8) else DarkBorder,
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                            .clickable {
-                                if (!isTranslated && !isTranslating) {
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.Translate,
+                                    contentDescription = "แปลภาษา",
+                                    tint = if (isTranslated) Color(0xFF38BDF8) else AmberPrimary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            },
+                            trailingIcon = {
+                                if (isTranslating) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        color = AmberPrimary,
+                                        strokeWidth = 2.dp
+                                    )
+                                } else if (isTranslated) {
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(Color(0xFF065F46))
+                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = "ไทย ✓",
+                                            color = Color(0xFF34D399),
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            },
+                            onClick = {
+                                showChromeMenu = false
+                                if (isTranslated) {
+                                    isTranslated = false
+                                    isTranslating = false
+                                    isAutoTranslate = false
+                                    prefs.isAutoTranslate = false
+                                    bridge.restoreOriginal()
+                                    Toast.makeText(context, "กลับสู่เนื้อหาต้นฉบับแล้ว", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    isTranslating = true
                                     isTranslateBarVisible = true
                                     prefs.showTranslateBar = true
                                     bridge.translatePage(targetLang)
-                                } else {
-                                    isTranslateBarVisible = !isTranslateBarVisible
-                                    prefs.showTranslateBar = isTranslateBarVisible
                                 }
+                            },
+                            modifier = Modifier.testTag("chrome_menu_translate")
+                        )
+
+                        // 3. แถบเครื่องมือสลับภาษา (Chrome Translate Bar)
+                        DropdownMenuItem(
+                            text = {
+                                Column {
+                                    Text(
+                                        text = if (isTranslateBarVisible) "ซ่อนแถบเลือกภาษา" else "แสดงแถบเลือกภาษา",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = Color.White
+                                    )
+                                    Text(
+                                        text = "เลือกภาษาอื่น (อังกฤษ จีน ญี่ปุ่น ฯลฯ)",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color(0xFF9CA3AF),
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.Language,
+                                    contentDescription = "แถบเลือกภาษา",
+                                    tint = Color(0xFF60A5FA),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            },
+                            trailingIcon = {
+                                Switch(
+                                    checked = isTranslateBarVisible,
+                                    onCheckedChange = { checked ->
+                                        isTranslateBarVisible = checked
+                                        prefs.showTranslateBar = checked
+                                        showChromeMenu = false
+                                    },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = Color.White,
+                                        checkedTrackColor = Color(0xFF0284C7),
+                                        uncheckedThumbColor = Color(0xFF9CA3AF),
+                                        uncheckedTrackColor = Color(0xFF3C4043)
+                                    ),
+                                    modifier = Modifier.size(width = 36.dp, height = 24.dp)
+                                )
+                            },
+                            onClick = {
+                                isTranslateBarVisible = !isTranslateBarVisible
+                                prefs.showTranslateBar = isTranslateBarVisible
+                                showChromeMenu = false
                             }
-                            .padding(horizontal = 8.dp, vertical = 5.dp)
-                            .testTag("toggle_translate_bar_button"),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.Translate,
-                                contentDescription = "แปลภาษา Google",
-                                tint = if (isTranslateBarVisible || isTranslated) Color.White else Color(0xFFD1D5DB),
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = if (isTranslating) "กำลังแปล..." else if (isTranslated) "แปลไทยแล้ว ✓" else "แปลภาษา",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = if (isTranslateBarVisible || isTranslated) Color.White else Color(0xFFD1D5DB),
-                                fontSize = 11.sp
-                            )
-                        }
+                        )
+
+                        // 4. แปลหน้านี้อัตโนมัติ (Always Translate)
+                        DropdownMenuItem(
+                            text = {
+                                Column {
+                                    Text(
+                                        text = "แปลหน้านี้อัตโนมัติ",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = Color.White
+                                    )
+                                    Text(
+                                        text = "แปลเป็นไทยทันทีเมื่อเปิดบทใหม่",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color(0xFF9CA3AF),
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.AutoFixHigh,
+                                    contentDescription = "แปลอัตโนมัติ",
+                                    tint = Color(0xFFA78BFA),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            },
+                            trailingIcon = {
+                                Switch(
+                                    checked = isAutoTranslate,
+                                    onCheckedChange = { checked ->
+                                        isAutoTranslate = checked
+                                        prefs.isAutoTranslate = checked
+                                        if (checked && !isTranslated && !isTranslating) {
+                                            isTranslating = true
+                                            bridge.translatePage(targetLang)
+                                        }
+                                        showChromeMenu = false
+                                    },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = Color.White,
+                                        checkedTrackColor = AmberPrimary,
+                                        uncheckedThumbColor = Color(0xFF9CA3AF),
+                                        uncheckedTrackColor = Color(0xFF3C4043)
+                                    ),
+                                    modifier = Modifier.size(width = 36.dp, height = 24.dp)
+                                )
+                            },
+                            onClick = {
+                                isAutoTranslate = !isAutoTranslate
+                                prefs.isAutoTranslate = isAutoTranslate
+                                if (isAutoTranslate && !isTranslated && !isTranslating) {
+                                    isTranslating = true
+                                    bridge.translatePage(targetLang)
+                                }
+                                showChromeMenu = false
+                            }
+                        )
+
+                        HorizontalDivider(color = Color(0xFF3C4043), thickness = 1.dp)
+
+                        // 5. แสดง/ซ่อน แถบเมนูด้านล่าง 3 ปุ่ม
+                        DropdownMenuItem(
+                            text = {
+                                Column {
+                                    Text(
+                                        text = if (isBottomNavVisible) "ซ่อนแถบ 3 เมนูล่าง" else "แสดงแถบ 3 เมนูล่าง",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Color.White
+                                    )
+                                    Text(
+                                        text = "แถบเมนูนำทางด้านล่างจอ",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color(0xFF9CA3AF),
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = if (isBottomNavVisible) Icons.Default.MenuOpen else Icons.Default.Menu,
+                                    contentDescription = "แถบ 3 เมนูล่าง",
+                                    tint = AmberPrimary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            },
+                            trailingIcon = {
+                                Switch(
+                                    checked = isBottomNavVisible,
+                                    onCheckedChange = {
+                                        onToggleBottomNav()
+                                        showChromeMenu = false
+                                    },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = Color.White,
+                                        checkedTrackColor = AmberPrimary,
+                                        uncheckedThumbColor = Color(0xFF9CA3AF),
+                                        uncheckedTrackColor = Color(0xFF3C4043)
+                                    ),
+                                    modifier = Modifier.size(width = 36.dp, height = 24.dp)
+                                )
+                            },
+                            onClick = {
+                                onToggleBottomNav()
+                                showChromeMenu = false
+                            },
+                            modifier = Modifier.testTag("chrome_menu_toggle_bottom_nav")
+                        )
+
+                        HorizontalDivider(color = Color(0xFF3C4043), thickness = 1.dp)
+
+                        // 6. ตั้งค่าเสียงอ่าน (TTS Voice Settings)
+                        DropdownMenuItem(
+                            text = {
+                                Column {
+                                    Text(
+                                        text = "ตั้งค่าเสียงอ่าน (TTS)",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = Color.White
+                                    )
+                                    Text(
+                                        text = "เลือกเสียง ความเร็ว และระดับเสียง",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color(0xFF9CA3AF),
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.RecordVoiceOver,
+                                    contentDescription = "ตั้งค่าเสียง",
+                                    tint = Color(0xFF10B981),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            },
+                            onClick = {
+                                showChromeMenu = false
+                                onNavigateToVoiceSettings()
+                            },
+                            modifier = Modifier.testTag("chrome_menu_voice_settings")
+                        )
+
+                        // 7. ล็อกแอพทำงานพื้นหลัง (HyperOS / Android Guide)
+                        DropdownMenuItem(
+                            text = {
+                                Column {
+                                    Text(
+                                        text = "วิธีล็อกแอพไม่ให้ดับ",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = Color.White
+                                    )
+                                    Text(
+                                        text = "คู่มือตั้งค่า HyperOS / Xiaomi / Android",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color(0xFF9CA3AF),
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.BatteryAlert,
+                                    contentDescription = "ล็อกแอพไม่ให้ดับ",
+                                    tint = AmberPrimary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            },
+                            onClick = {
+                                showChromeMenu = false
+                                onNavigateToBackgroundSettings()
+                            },
+                            modifier = Modifier.testTag("chrome_menu_background_guide")
+                        )
                     }
                 }
             }
@@ -478,9 +764,8 @@ fun WebCompanionScreen(
                             ViewGroup.LayoutParams.MATCH_PARENT
                         )
 
-                        // WebView internally manages hardware accelerated tile rendering via Chromium.
-                        // Setting LAYER_TYPE_NONE avoids unnecessary offscreen buffers that trigger Mesa DRM rendernode errors.
-                        setLayerType(android.view.View.LAYER_TYPE_NONE, null)
+                        // Use hardware rendering for smooth 60fps scrolling and lag-free novel reading
+                        setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
 
                         // Enable cookies and 3rd party cookies for SPA/Auth sites
                         val webViewInstanceRef = this
@@ -492,7 +777,7 @@ fun WebCompanionScreen(
                         settings.apply {
                             javaScriptEnabled = true
                             domStorageEnabled = true
-                            databaseEnabled = false // Reduce SQLite RAM usage
+                            databaseEnabled = true
                             mediaPlaybackRequiresUserGesture = false
                             useWideViewPort = true
                             loadWithOverviewMode = true
@@ -645,22 +930,41 @@ fun WebCompanionScreen(
                                     }, 600)
                                 }
 
-                                // Auto-continue reading next/prev chapter ONLY if user triggered navigation
-                                view?.postDelayed({
-                                    view.evaluateJavascript("""
-                                        (function() {
-                                            try {
-                                                if (sessionStorage.getItem('__novel_auto_play_next') === 'true') {
-                                                    sessionStorage.removeItem('__novel_auto_play_next');
-                                                    const autoPlayBtn = document.querySelector('.btn-read, .btn-play, #btn-tts, #read-novel, [data-action="auto-read"], .tts-play, #play-button, .reader-play, .audio-play, .play-btn, .btn-read-play, [aria-label*="Play"], [title*="เล่น"], [title*="Play"]');
-                                                    if (autoPlayBtn && typeof autoPlayBtn.click === 'function') {
-                                                        autoPlayBtn.click();
+                                // Auto-continue reading next/prev chapter when triggered by background or user navigation
+                                // Use progressive attempts (400ms, 1200ms, 2500ms) to ensure dynamically rendered reader buttons are caught immediately
+                                val autoPlayScript = """
+                                    (function() {
+                                        try {
+                                            if (sessionStorage.getItem('__novel_auto_play_next') === 'true') {
+                                                const playSelectors = [
+                                                    '.btn-read', '.btn-play', '#btn-tts', '#read-novel', '[data-action="auto-read"]',
+                                                    '.tts-play', '#play-button', '.reader-play', '.audio-play', '.play-btn', '.btn-read-play',
+                                                    '.tts-btn', '#tts-play', 'button[title*="อ่าน"]', 'button[title*="Play"]',
+                                                    '[aria-label*="Play"]', '[aria-label*="อ่าน"]', '[title*="เล่น"]', '[title*="Play"]'
+                                                ];
+                                                for (let sel of playSelectors) {
+                                                    let btn = document.querySelector(sel);
+                                                    if (btn && typeof btn.click === 'function') {
+                                                        sessionStorage.removeItem('__novel_auto_play_next');
+                                                        btn.click();
+                                                        return true;
                                                     }
                                                 }
-                                            } catch(e) {}
-                                        })();
-                                    """.trimIndent(), null)
-                                }, 1200)
+                                                // If reader has a global start function
+                                                if (window.reader && typeof window.reader.play === 'function') {
+                                                    sessionStorage.removeItem('__novel_auto_play_next');
+                                                    window.reader.play();
+                                                    return true;
+                                                }
+                                            }
+                                        } catch(e) {}
+                                        return false;
+                                    })();
+                                """.trimIndent()
+
+                                view?.postDelayed({ view.evaluateJavascript(autoPlayScript, null) }, 400)
+                                view?.postDelayed({ view.evaluateJavascript(autoPlayScript, null) }, 1200)
+                                view?.postDelayed({ view.evaluateJavascript(autoPlayScript, null) }, 2500)
                             }
 
                             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {

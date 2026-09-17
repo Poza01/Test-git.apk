@@ -165,7 +165,8 @@ fun MainAppContainer(
                     service = service,
                     isBottomNavVisible = isBottomNavVisible,
                     onToggleBottomNav = { isBottomNavVisible = !isBottomNavVisible },
-                    onNavigateToBackgroundSettings = { currentScreen = AppScreen.BACKGROUND_SETTINGS }
+                    onNavigateToBackgroundSettings = { currentScreen = AppScreen.BACKGROUND_SETTINGS },
+                    onNavigateToVoiceSettings = { currentScreen = AppScreen.VOICE_SETTINGS }
                 )
             }
 

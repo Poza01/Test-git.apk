@@ -17,8 +17,8 @@ import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.speech.tts.Voice
 import android.util.Log
+import android.widget.RemoteViews
 import androidx.core.app.NotificationCompat
-import androidx.media.app.NotificationCompat.MediaStyle
 import com.example.MainActivity
 import com.example.R
 import kotlinx.coroutines.CoroutineScope
@@ -51,6 +51,10 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
     private var currentWebUtteranceId: String? = null
     private var isWebAudioPlaying: Boolean = false
     private var webIdleJob: kotlinx.coroutines.Job? = null
+
+    data class WebSpeechHistoryItem(val text: String, val title: String, val utteranceId: String)
+    private val webSpeechHistory = mutableListOf<WebSpeechHistoryItem>()
+    private var webHistoryIndex: Int = -1
 
     var onUtteranceEvent: ((event: String, utteranceId: String) -> Unit)? = null
 
@@ -154,16 +158,33 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
                         onUtteranceEvent?.invoke("ondone", utteranceId)
                     }
                     if (utteranceId?.startsWith("web_utt_") == true) {
-                        // Web-driven single utterance completed - keep isPlaying true while reading session is active
-                        val expectedId = "web_utt_$currentWebUtteranceId"
-                        if (utteranceId == expectedId) {
-                            webIdleJob?.cancel()
-                            webIdleJob = serviceScope.launch {
-                                // Wait 8 seconds of continuous silence before marking as idle/stopped
-                                kotlinx.coroutines.delay(8000L)
-                                if (_playbackState.value.isPlaying && !isWebAudioPlaying && tts?.isSpeaking != true) {
-                                    _playbackState.update { it.copy(isPlaying = false, isPaused = false) }
-                                    updateForegroundNotification()
+                        // If we are rewound in history and there are subsequent lines in history, read next line automatically!
+                        if (webHistoryIndex >= 0 && webHistoryIndex < webSpeechHistory.size - 1) {
+                            webHistoryIndex++
+                            val nextItem = webSpeechHistory[webHistoryIndex]
+                            currentWebUtteranceId = nextItem.utteranceId
+                            _playbackState.update {
+                                it.copy(
+                                    chapterTitle = nextItem.title.ifBlank { "อ่านนิยายเว็บ" },
+                                    currentText = nextItem.text,
+                                    isPlaying = true,
+                                    isPaused = false
+                                )
+                            }
+                            updateForegroundNotification()
+                            val nextUtteranceId = "web_utt_${nextItem.utteranceId}"
+                            tts?.speak(nextItem.text, TextToSpeech.QUEUE_FLUSH, null, nextUtteranceId)
+                        } else {
+                            val expectedId = "web_utt_$currentWebUtteranceId"
+                            if (utteranceId == expectedId) {
+                                webIdleJob?.cancel()
+                                webIdleJob = serviceScope.launch {
+                                    // Wait 8 seconds of continuous silence before marking as idle/stopped
+                                    kotlinx.coroutines.delay(8000L)
+                                    if (_playbackState.value.isPlaying && !isWebAudioPlaying && tts?.isSpeaking != true) {
+                                        _playbackState.update { it.copy(isPlaying = false, isPaused = false) }
+                                        updateForegroundNotification()
+                                    }
                                 }
                             }
                         }
@@ -265,6 +286,15 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
         webIdleJob?.cancel()
         currentWebUtteranceId = webUtteranceId
         isWebAudioPlaying = false
+
+        // Keep history for rewinding sentences seamlessly
+        if (webSpeechHistory.isEmpty() || webSpeechHistory.lastOrNull()?.text != cleanText) {
+            webSpeechHistory.add(WebSpeechHistoryItem(cleanText, title, webUtteranceId))
+            if (webSpeechHistory.size > 300) {
+                webSpeechHistory.removeAt(0)
+            }
+        }
+        webHistoryIndex = webSpeechHistory.size - 1
 
         if (!_playbackState.value.isInitialized || tts == null) {
             Log.d(TAG, "TTS not ready yet, queuing speakFromWeb")
@@ -431,6 +461,23 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
         if (state.paragraphs.isNotEmpty() && state.activeParagraphIndex < state.paragraphs.size - 1) {
             val nextIndex = (state.activeParagraphIndex + 1).coerceAtMost(state.paragraphs.size - 1)
             speakParagraphInternal(nextIndex)
+        } else if (webSpeechHistory.isNotEmpty() && webHistoryIndex >= 0 && webHistoryIndex < webSpeechHistory.size - 1) {
+            webHistoryIndex++
+            val nextItem = webSpeechHistory[webHistoryIndex]
+            webIdleJob?.cancel()
+            currentWebUtteranceId = nextItem.utteranceId
+            _playbackState.update {
+                it.copy(
+                    chapterTitle = nextItem.title.ifBlank { "อ่านนิยายเว็บ" },
+                    currentText = nextItem.text,
+                    isPlaying = true,
+                    isPaused = false
+                )
+            }
+            updateForegroundNotification()
+            val utteranceId = "web_utt_${nextItem.utteranceId}"
+            tts?.speak(nextItem.text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+            com.example.bridge.NovelTtsBridge.notifyNextFromService()
         } else {
             com.example.bridge.NovelTtsBridge.notifyNextFromService()
         }
@@ -441,6 +488,23 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
         if (state.paragraphs.isNotEmpty() && state.activeParagraphIndex > 0) {
             val prevIndex = (state.activeParagraphIndex - 1).coerceAtLeast(0)
             speakParagraphInternal(prevIndex)
+        } else if (webSpeechHistory.isNotEmpty() && webHistoryIndex > 0) {
+            webHistoryIndex--
+            val prevItem = webSpeechHistory[webHistoryIndex]
+            webIdleJob?.cancel()
+            currentWebUtteranceId = prevItem.utteranceId
+            _playbackState.update {
+                it.copy(
+                    chapterTitle = prevItem.title.ifBlank { "อ่านนิยายเว็บ" },
+                    currentText = prevItem.text,
+                    isPlaying = true,
+                    isPaused = false
+                )
+            }
+            updateForegroundNotification()
+            val utteranceId = "web_utt_${prevItem.utteranceId}"
+            tts?.speak(prevItem.text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+            com.example.bridge.NovelTtsBridge.notifyPrevFromService()
         } else {
             com.example.bridge.NovelTtsBridge.notifyPrevFromService()
         }
@@ -535,39 +599,47 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
         val stopIntent = Intent(this, TtsForegroundService::class.java).apply { action = ACTION_STOP }
         val pendingStop = PendingIntent.getService(this, 4, stopIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
-        val playPauseIcon = if (state.isPlaying) R.drawable.ic_notif_pause else R.drawable.ic_notif_play
-        val playPauseText = if (state.isPlaying) "พักเสียง" else "เล่นต่อ"
+        return try {
+            val remoteViews = RemoteViews(packageName, R.layout.notification_custom_player).apply {
+                setTextViewText(R.id.notif_title, title)
+                setTextViewText(R.id.notif_subtext, if (state.isPlaying) "กำลังอ่านเสียง" else "พักชั่วคราว")
+                setImageViewResource(
+                    R.id.btn_notif_play_pause,
+                    if (state.isPlaying) R.drawable.ic_notif_pause else R.drawable.ic_notif_play
+                )
+                setOnClickPendingIntent(R.id.btn_notif_prev, pendingPrev)
+                setOnClickPendingIntent(R.id.btn_notif_play_pause, pendingPlayPause)
+                setOnClickPendingIntent(R.id.btn_notif_next, pendingNext)
+                setOnClickPendingIntent(R.id.btn_notif_speaker, pendingContentIntent)
+                setOnClickPendingIntent(R.id.notif_root, pendingContentIntent)
+            }
 
-        val coverBitmap = try {
-            BitmapFactory.decodeResource(resources, R.drawable.img_app_cover_1787456498575)
+            NotificationCompat.Builder(this, CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_notif_play)
+                .setContentIntent(pendingContentIntent)
+                .setOngoing(state.isPlaying)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
+                .setCustomContentView(remoteViews)
+                .setCustomBigContentView(remoteViews)
+                .build()
         } catch (e: Exception) {
-            null
+            Log.e("TtsService", "Error creating custom notification, fallback to standard", e)
+            NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle(title)
+                .setContentText(paraInfo)
+                .setSmallIcon(R.drawable.ic_notif_play)
+                .setContentIntent(pendingContentIntent)
+                .setOngoing(state.isPlaying)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
+                .addAction(R.drawable.ic_notif_prev, "ย้อนบรรทัด", pendingPrev)
+                .addAction(if (state.isPlaying) R.drawable.ic_notif_pause else R.drawable.ic_notif_play, if (state.isPlaying) "พัก" else "เล่น", pendingPlayPause)
+                .addAction(R.drawable.ic_notif_next, "ถัดไป", pendingNext)
+                .build()
         }
-
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(title)
-            .setContentText(paraInfo)
-            .setSubText(if (state.isPlaying) "กำลังอ่านเสียง" else "พักชั่วคราว")
-            .setSmallIcon(R.drawable.ic_notif_play)
-            .setLargeIcon(coverBitmap)
-            .setContentIntent(pendingContentIntent)
-            .setOngoing(state.isPlaying)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
-            .setColor(0xFFF59E0B.toInt())
-            .setColorized(true)
-            .addAction(R.drawable.ic_notif_prev, "ย้อนกลับ", pendingPrev)
-            .addAction(playPauseIcon, playPauseText, pendingPlayPause)
-            .addAction(R.drawable.ic_notif_next, "ถัดไป", pendingNext)
-            .addAction(R.drawable.ic_notif_stop, "ปิด", pendingStop)
-            .setStyle(
-                MediaStyle()
-                    .setShowActionsInCompactView(0, 1, 2)
-                    .setShowCancelButton(true)
-                    .setCancelButtonIntent(pendingStop)
-            )
-            .build()
     }
 
     private fun createNotificationChannel() {

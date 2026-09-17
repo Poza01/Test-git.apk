@@ -770,6 +770,41 @@ class NovelTtsBridge(
                         }
                     } catch(e) {}
 
+                    function simulateFullClick(el) {
+                        if (!el) return false;
+                        try {
+                            el.focus();
+                            ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(evtType => {
+                                const evt = new MouseEvent(evtType, {
+                                    bubbles: true,
+                                    cancelable: true,
+                                    view: window,
+                                    buttons: 1
+                                });
+                                el.dispatchEvent(evt);
+                            });
+                            if (typeof el.click === 'function') {
+                                el.click();
+                            }
+                            // If element is a link with href, navigate explicitly if default click didn't change location
+                            if (el.tagName === 'A' && el.href && !el.href.startsWith('javascript:void') && !el.href.startsWith('#')) {
+                                setTimeout(function() {
+                                    if (location.href !== el.href) {
+                                        window.location.href = el.href;
+                                    }
+                                }, 50);
+                            }
+                            return true;
+                        } catch(e) {
+                            try {
+                                if (typeof el.click === 'function') el.click();
+                                if (el.tagName === 'A' && el.href) window.location.href = el.href;
+                                return true;
+                            } catch(err) {}
+                        }
+                        return false;
+                    }
+
                     // 6. Unified Notification Control Actions for all engines (Device, Google, Microsoft)
                     window.__android_tts_resume = function() {
                         try {
@@ -792,8 +827,8 @@ class NovelTtsBridge(
                                     utt.onresume({ type: 'resume', utterance: utt });
                                 }
                             }
-                            const playBtn = document.querySelector('.tts-play, .btn-play, [data-action="play"], #play-button, .reader-play, .audio-play, .play-btn, .btn-read-play, [aria-label*="Play"], [title*="เล่น"], [title*="Play"], .fa-play');
-                            if (playBtn) { playBtn.click(); }
+                            const playBtn = document.querySelector('.tts-play, .btn-play, [data-action="play"], #play-button, .reader-play, .audio-play, .play-btn, .btn-read-play, [aria-label*="Play" i], [title*="เล่น" i], [title*="Play" i], .fa-play');
+                            if (playBtn) { simulateFullClick(playBtn); }
                             return true;
                         } catch(e) {
                             console.error("Resume error", e);
@@ -822,8 +857,8 @@ class NovelTtsBridge(
                                     utt.onpause({ type: 'pause', utterance: utt });
                                 }
                             }
-                            const pauseBtn = document.querySelector('.tts-pause, [data-action="pause"], #pause-button, .reader-pause, .audio-pause, .pause-btn, [aria-label*="Pause"], [title*="หยุด"]');
-                            if (pauseBtn) { pauseBtn.click(); }
+                            const pauseBtn = document.querySelector('.tts-pause, [data-action="pause"], #pause-button, .reader-pause, .audio-pause, .pause-btn, [aria-label*="Pause" i], [title*="หยุด" i]');
+                            if (pauseBtn) { simulateFullClick(pauseBtn); }
                             return true;
                         } catch(e) {
                             console.error("Pause error", e);
@@ -837,15 +872,42 @@ class NovelTtsBridge(
                             if (window.__mediaSessionHandlers && typeof window.__mediaSessionHandlers['nexttrack'] === 'function') {
                                 try { window.__mediaSessionHandlers['nexttrack'](); return 'mediasession'; } catch(e){}
                             }
+
+                            // 1. Check direct JS methods on window
+                            if (window.reader && typeof window.reader.next === 'function') {
+                                try { window.reader.next(); return 'reader_next'; } catch(e){}
+                            }
+                            if (window.player && typeof window.player.next === 'function') {
+                                try { window.player.next(); return 'player_next'; } catch(e){}
+                            }
+
+                            // 2. Next paragraph/line/sentence controls on web readers (Right side buttons / floating toolbar)
                             const nextParaSelectors = [
                                 '.tts-next', '.btn-next-para', '[data-action="next-para"]', '.reader-next',
-                                '.next-sentence', '.next-para', '[title*="ย่อหน้าถัดไป"]', '[title*="ประโยคถัดไป"]',
-                                '[aria-label*="Next paragraph"]', '[aria-label*="Next sentence"]', '.btn-next-sentence'
+                                '.next-sentence', '.next-para', '[title*="ถัดไป" i]', '[title*="หน้า" i]',
+                                '[aria-label*="Next" i]', '[aria-label*="ถัดไป" i]', '.btn-next-sentence',
+                                '.btn-next-line', '#next-sentence-btn', '.audio-next', '.fa-step-forward',
+                                'button:has(.fa-step-forward)', 'a:has(.fa-step-forward)', '.novel-next-para',
+                                '[data-action="next"]', '.tts-btn-next', '#tts-next', '#btn-next', '.btn-next',
+                                '[data-cmd*="next" i]', '[data-role*="next" i]', '[class*="next-line" i]',
+                                '[class*="next-sentence" i]', '[class*="btn-next" i]'
                             ];
                             for (let s of nextParaSelectors) {
                                 let el = document.querySelector(s);
-                                if (el) { el.click(); return 'clicked_next_para_' + s; }
+                                if (el && el.offsetParent !== null) {
+                                    simulateFullClick(el);
+                                    return 'clicked_next_para_' + s;
+                                }
                             }
+                            for (let s of nextParaSelectors) {
+                                let el = document.querySelector(s);
+                                if (el) {
+                                    simulateFullClick(el);
+                                    return 'clicked_next_para_' + s;
+                                }
+                            }
+
+                            // 3. If speech utterance active, fast forward
                             if (window.__android_active_utterance_id) {
                                 const currUtt = (window.__android_tts_utterances || {})[window.__android_active_utterance_id];
                                 if (currUtt && typeof currUtt.onend === 'function') {
@@ -855,9 +917,11 @@ class NovelTtsBridge(
                                     return 'advanced_speech_utterance';
                                 }
                             }
+
                             if (typeof window.__novel_next_chapter === 'function') {
                                 try { window.__novel_next_chapter(); return 'custom_chapter'; } catch(e){}
                             }
+
                             const chapterSelectors = [
                                 '#next_url', '.next_page', '#next-chapter', '.next-chapter', '.btn-next',
                                 'a[rel="next"]', 'button.next', 'a.next', 'a.nextChapter', '.chapter-next a',
@@ -865,11 +929,11 @@ class NovelTtsBridge(
                             ];
                             for (let cs of chapterSelectors) {
                                 let cEl = document.querySelector(cs);
-                                if (cEl && cEl.offsetParent !== null) { cEl.click(); return 'clicked_chapter_' + cs; }
+                                if (cEl && cEl.offsetParent !== null) { simulateFullClick(cEl); return 'clicked_chapter_' + cs; }
                             }
                             for (let cs of chapterSelectors) {
                                 let cEl = document.querySelector(cs);
-                                if (cEl) { cEl.click(); return 'clicked_chapter_' + cs; }
+                                if (cEl) { simulateFullClick(cEl); return 'clicked_chapter_' + cs; }
                             }
                             const xpathList = [
                                 "//a[contains(text(), 'ตอนต่อไป') or contains(text(), 'บทถัดไป') or contains(text(), 'ถัดไป') or contains(text(), 'ตอนหน้า')]",
@@ -878,7 +942,7 @@ class NovelTtsBridge(
                             ];
                             for (let xp of xpathList) {
                                 let res = document.evaluate(xp, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-                                if (res) { res.click(); return 'clicked_xpath'; }
+                                if (res) { simulateFullClick(res); return 'clicked_xpath'; }
                             }
                             window.scrollBy({ top: window.innerHeight * 0.75, behavior: 'smooth' });
                             return 'scrolled';
@@ -891,38 +955,58 @@ class NovelTtsBridge(
                     window.__android_tts_prev = function() {
                         try {
                             try { sessionStorage.setItem('__novel_auto_play_next', 'true'); } catch(e){}
+
+                            // 1. Check MediaSession previoustrack handler first
                             if (window.__mediaSessionHandlers && typeof window.__mediaSessionHandlers['previoustrack'] === 'function') {
                                 try { window.__mediaSessionHandlers['previoustrack'](); return 'mediasession'; } catch(e){}
                             }
 
-                            // 1. If playing HTML5 Audio, rewind 10s or restart current audio if > 3s
-                            if (window.__active_html5_audio) {
-                                try {
-                                    if (window.__active_html5_audio.currentTime > 3) {
-                                        window.__active_html5_audio.currentTime = Math.max(0, window.__active_html5_audio.currentTime - 10);
-                                        return 'rewound_audio';
-                                    }
-                                } catch(e){}
+                            // 2. Check direct JS methods on window
+                            if (window.reader && typeof window.reader.prev === 'function') {
+                                try { window.reader.prev(); return 'reader_prev'; } catch(e){}
+                            }
+                            if (window.player && typeof window.player.prev === 'function') {
+                                try { window.player.prev(); return 'player_prev'; } catch(e){}
+                            }
+                            if (typeof window.readPrev === 'function') {
+                                try { window.readPrev(); return 'readPrev'; } catch(e){}
                             }
 
-                            // 2. Click previous paragraph/sentence controls on web novel readers
+                            // 3. Click previous paragraph/sentence controls on web novel readers (Floating right panel / toolbar)
                             const prevParaSelectors = [
                                 '.tts-prev', '.btn-prev-para', '[data-action="prev-para"]', '.reader-prev',
-                                '.prev-sentence', '.prev-para', '[title*="ย่อหน้าก่อนหน้า"]', '[title*="ประโยคก่อนหน้า"]',
-                                '[aria-label*="Previous paragraph"]', '[aria-label*="Previous sentence"]', '.btn-prev-sentence',
-                                '.btn-prev-speech', '#btn-prev-tts', '.tts-backward', '[data-action="prev-sentence"]',
-                                '.btn-prev-line', '#prev-sentence-btn', '.audio-prev', '.fa-step-backward'
+                                '.prev-sentence', '.prev-para', '[title*="ย้อน" i]', '[title*="ก่อน" i]',
+                                '[aria-label*="ย้อน" i]', '[aria-label*="ก่อน" i]', '[aria-label*="Previous" i]',
+                                '.btn-prev-sentence', '.btn-prev-speech', '#btn-prev-tts', '.tts-backward',
+                                '[data-action="prev-sentence"]', '.btn-prev-line', '#prev-sentence-btn',
+                                '.audio-prev', '.fa-step-backward', '.fa-backward',
+                                'button:has(.fa-step-backward)', 'a:has(.fa-step-backward)',
+                                'button:has(.fa-backward)', 'a:has(.fa-backward)',
+                                '.novel-prev-para', '[data-action="prev"]', '.tts-btn-prev', '#tts-prev',
+                                '#btn-prev', '.btn-prev', '[data-cmd*="prev" i]', '[data-role*="prev" i]',
+                                '[class*="prev-line" i]', '[class*="prev-sentence" i]', '[class*="btn-prev" i]'
                             ];
                             for (let s of prevParaSelectors) {
                                 let el = document.querySelector(s);
-                                if (el) { el.click(); return 'clicked_prev_para_' + s; }
+                                if (el && el.offsetParent !== null) {
+                                    simulateFullClick(el);
+                                    return 'clicked_prev_para_' + s;
+                                }
+                            }
+                            for (let s of prevParaSelectors) {
+                                let el = document.querySelector(s);
+                                if (el) {
+                                    simulateFullClick(el);
+                                    return 'clicked_prev_para_' + s;
+                                }
                             }
 
-                            // 3. Move active highlight to previous sentence/paragraph in web reader and trigger its click/read
+                            // 4. Web Novel Reader Active Sentence / Element Navigation: Find previous element in DOM
                             const activeSentenceSelectors = [
                                 '.reading', '.tts-reading', '.active-sentence', '.highlight-reading',
                                 '.highlight', '[data-reading="true"]', '.current-read', '.reading-active',
-                                '.active-para', '.speech-highlight', '.speaking', '.tts-active'
+                                '.active-para', '.speech-highlight', '.speaking', '.tts-active',
+                                'span.active', 'p.active', '.text-reading', '.current-sentence'
                             ];
                             let currentReadingEl = null;
                             for (let sel of activeSentenceSelectors) {
@@ -932,29 +1016,45 @@ class NovelTtsBridge(
 
                             if (currentReadingEl) {
                                 let prevEl = currentReadingEl.previousElementSibling;
-                                while (prevEl && prevEl.tagName !== 'P' && prevEl.tagName !== 'DIV' && prevEl.tagName !== 'SPAN' && !prevEl.classList.contains('sentence')) {
+                                while (prevEl && prevEl.tagName !== 'P' && prevEl.tagName !== 'DIV' && prevEl.tagName !== 'SPAN' && !prevEl.classList.contains('sentence') && !prevEl.classList.contains('text-line')) {
                                     prevEl = prevEl.previousElementSibling;
                                 }
                                 if (!prevEl && currentReadingEl.parentElement) {
                                     let parentPrev = currentReadingEl.parentElement.previousElementSibling;
                                     if (parentPrev) {
-                                        prevEl = parentPrev.querySelector('p, .sentence, span') || parentPrev;
+                                        prevEl = parentPrev.querySelector('p, .sentence, span, .text-line') || parentPrev;
                                     }
                                 }
                                 if (prevEl) {
-                                    if (window.speechSynthesis) window.speechSynthesis.cancel();
-                                    prevEl.click();
+                                    try {
+                                        currentReadingEl.classList.remove('reading', 'tts-reading', 'active-sentence', 'highlight', 'current-read', 'reading-active', 'active');
+                                        prevEl.classList.add('reading', 'active-sentence');
+                                    } catch(e){}
+                                    simulateFullClick(prevEl);
                                     prevEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
                                     return 'clicked_prev_dom_element';
                                 }
                             }
 
-                            // 4. Custom chapter hook
+                            // 5. If playing HTML5 Audio, rewind 10s or restart current audio clip
+                            if (window.__active_html5_audio) {
+                                try {
+                                    if (window.__active_html5_audio.currentTime > 3) {
+                                        window.__active_html5_audio.currentTime = 0;
+                                        return 'restarted_audio';
+                                    } else {
+                                        window.__active_html5_audio.currentTime = Math.max(0, window.__active_html5_audio.currentTime - 10);
+                                        return 'rewound_audio';
+                                    }
+                                } catch(e){}
+                            }
+
+                            // 6. Custom chapter hook
                             if (typeof window.__novel_prev_chapter === 'function') {
                                 try { window.__novel_prev_chapter(); return 'custom_chapter'; } catch(e){}
                             }
 
-                            // 5. Click previous chapter link / button
+                            // 7. Click previous chapter link / button
                             const chapterSelectors = [
                                 '#prev_url', '.prev_page', '#prev-chapter', '.prev-chapter', '.btn-prev',
                                 'a[rel="prev"]', 'button.prev', 'a.prev', 'a.prevChapter', '.chapter-prev a',
@@ -964,14 +1064,14 @@ class NovelTtsBridge(
                             ];
                             for (let cs of chapterSelectors) {
                                 let cEl = document.querySelector(cs);
-                                if (cEl && cEl.offsetParent !== null) { cEl.click(); return 'clicked_chapter_' + cs; }
+                                if (cEl && cEl.offsetParent !== null) { simulateFullClick(cEl); return 'clicked_chapter_' + cs; }
                             }
                             for (let cs of chapterSelectors) {
                                 let cEl = document.querySelector(cs);
-                                if (cEl) { cEl.click(); return 'clicked_chapter_' + cs; }
+                                if (cEl) { simulateFullClick(cEl); return 'clicked_chapter_' + cs; }
                             }
 
-                            // 6. XPath fallback for Thai / English previous chapter buttons
+                            // 8. XPath fallback for Thai / English previous chapter buttons
                             const xpathList = [
                                 "//a[contains(text(), 'ตอนก่อนหน้า') or contains(text(), 'บทก่อนหน้า') or contains(text(), 'ก่อนหน้า') or contains(text(), 'ตอนที่แล้ว')]",
                                 "//a[contains(text(), '上一章') or contains(text(), '上一页') or contains(text(), 'Previous Chapter') or contains(text(), 'Prev')]",
@@ -979,7 +1079,7 @@ class NovelTtsBridge(
                             ];
                             for (let xp of xpathList) {
                                 let res = document.evaluate(xp, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-                                if (res) { res.click(); return 'clicked_xpath'; }
+                                if (res) { simulateFullClick(res); return 'clicked_xpath'; }
                             }
                             window.scrollBy({ top: -window.innerHeight * 0.75, behavior: 'smooth' });
                             return 'scrolled';
@@ -1212,7 +1312,7 @@ class NovelTtsBridge(
                         }
                     };
 
-                    // 6. Restore Original (Zero-reload instantaneous DOM rollback)
+                    // 6. Restore Original (Zero-reload instantaneous DOM rollback & disable Google Translate engine)
                     window.__chrome_translate_restore = function() {
                         try {
                             if (window.__chrome_translate_interval) {
@@ -1235,7 +1335,22 @@ class NovelTtsBridge(
                                 });
                             });
 
-                            // 2. In-place instantaneous DOM restoration from pristine snapshot
+                            // 2. Clear Google Translate Script & Observers to prevent re-translation loop
+                            try {
+                                var script = document.getElementById('google-translate-script');
+                                if (script && script.parentNode) { script.parentNode.removeChild(script); }
+                                var elem = document.getElementById('google_translate_element');
+                                if (elem && elem.parentNode) { elem.parentNode.removeChild(elem); }
+                                var gtTt = document.getElementById('goog-gt-tt');
+                                if (gtTt && gtTt.parentNode) { gtTt.parentNode.removeChild(gtTt); }
+                                var iframes = document.querySelectorAll('.goog-te-banner-frame, .skiptranslate');
+                                iframes.forEach(function(f) { if (f && f.parentNode) f.parentNode.removeChild(f); });
+                                if (window.google && window.google.translate) {
+                                    delete window.google.translate;
+                                }
+                            } catch(e) {}
+
+                            // 3. In-place instantaneous DOM restoration from pristine snapshot
                             if (window.__original_html_snapshot && window.__snapshot_url === location.href) {
                                 var currentY = window.scrollY || window.pageYOffset || (document.documentElement ? document.documentElement.scrollTop : 0) || 0;
 
@@ -1251,9 +1366,6 @@ class NovelTtsBridge(
                                     window.scrollTo(0, currentY);
                                 }, 30);
 
-                                ensureTranslateElement();
-                                loadGoogleTranslateScript();
-
                                 if (window.__android_tts_sync_ready) {
                                     window.__android_tts_sync_ready();
                                 }
@@ -1264,7 +1376,7 @@ class NovelTtsBridge(
                                 return true;
                             }
 
-                            // 3. Fallback if snapshot wasn't available: reset combo and classes
+                            // 4. Fallback if snapshot wasn't available: reset combo and classes
                             var select = document.querySelector('.goog-te-combo');
                             if (select) {
                                 var origOption = select.querySelector('option[value=""]') || select.options[0];
