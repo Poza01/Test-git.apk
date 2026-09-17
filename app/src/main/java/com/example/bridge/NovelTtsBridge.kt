@@ -808,18 +808,26 @@ class NovelTtsBridge(
                     // 6. Unified Notification Control Actions for all engines (Device, Google, Microsoft)
                     window.__android_tts_resume = function() {
                         try {
+                            // 1. If web has mediaSession handler for play
                             if (window.__mediaSessionHandlers && typeof window.__mediaSessionHandlers['play'] === 'function') {
                                 try { window.__mediaSessionHandlers['play'](); } catch(e){}
                             }
+                            // 2. Resume HTML5 Audio elements
                             if (window.__active_html5_audio && window.__active_html5_audio.paused) {
                                 window.__active_html5_audio.play().catch(() => {});
                             }
                             document.querySelectorAll('audio').forEach(a => {
                                 if (a.paused && a.src) a.play().catch(() => {});
                             });
+                            // 3. Resume SpeechSynthesis
                             if (window.speechSynthesis) {
                                 window.speechSynthesis.paused = false;
                                 window.speechSynthesis.speaking = true;
+                                try {
+                                    if (typeof window.speechSynthesis.resume === 'function') {
+                                        window.speechSynthesis.resume();
+                                    }
+                                } catch(e){}
                             }
                             if (window.__android_active_utterance_id) {
                                 const utt = (window.__android_tts_utterances || {})[window.__android_active_utterance_id];
@@ -827,7 +835,8 @@ class NovelTtsBridge(
                                     utt.onresume({ type: 'resume', utterance: utt });
                                 }
                             }
-                            const playBtn = document.querySelector('.tts-play, .btn-play, [data-action="play"], #play-button, .reader-play, .audio-play, .play-btn, .btn-read-play, [aria-label*="Play" i], [title*="เล่น" i], [title*="Play" i], .fa-play');
+                            // 4. Click web reader Play/Resume button if present
+                            const playBtn = document.querySelector('.tts-play, .btn-play, [data-action="play"], #play-button, .reader-play, .audio-play, .play-btn, .btn-read-play, [aria-label*="Play" i], [title*="เล่น" i], [title*="Play" i], [aria-label*="เล่น" i], .fa-play');
                             if (playBtn) { simulateFullClick(playBtn); }
                             return true;
                         } catch(e) {
@@ -838,18 +847,26 @@ class NovelTtsBridge(
 
                     window.__android_tts_pause = function() {
                         try {
+                            // 1. If web has mediaSession handler for pause
                             if (window.__mediaSessionHandlers && typeof window.__mediaSessionHandlers['pause'] === 'function') {
                                 try { window.__mediaSessionHandlers['pause'](); } catch(e){}
                             }
+                            // 2. Pause all HTML5 Audio
                             if (window.__active_html5_audio && !window.__active_html5_audio.paused) {
                                 window.__active_html5_audio.pause();
                             }
                             document.querySelectorAll('audio').forEach(a => {
                                 if (!a.paused) a.pause();
                             });
+                            // 3. Pause SpeechSynthesis
                             if (window.speechSynthesis) {
                                 window.speechSynthesis.paused = true;
                                 window.speechSynthesis.speaking = false;
+                                try {
+                                    if (typeof window.speechSynthesis.pause === 'function') {
+                                        window.speechSynthesis.pause();
+                                    }
+                                } catch(e){}
                             }
                             if (window.__android_active_utterance_id) {
                                 const utt = (window.__android_tts_utterances || {})[window.__android_active_utterance_id];
@@ -857,7 +874,8 @@ class NovelTtsBridge(
                                     utt.onpause({ type: 'pause', utterance: utt });
                                 }
                             }
-                            const pauseBtn = document.querySelector('.tts-pause, [data-action="pause"], #pause-button, .reader-pause, .audio-pause, .pause-btn, [aria-label*="Pause" i], [title*="หยุด" i]');
+                            // 4. Click web reader Pause button if present
+                            const pauseBtn = document.querySelector('.tts-pause, [data-action="pause"], #pause-button, .reader-pause, .audio-pause, .pause-btn, [aria-label*="Pause" i], [title*="หยุด" i], [aria-label*="หยุด" i], .fa-pause');
                             if (pauseBtn) { simulateFullClick(pauseBtn); }
                             return true;
                         } catch(e) {
@@ -866,31 +884,33 @@ class NovelTtsBridge(
                         }
                     };
 
+                    // Move to Next Sentence / Paragraph in the web TTS reader (NEVER hop chapter from notification button)
                     window.__android_tts_next = function() {
                         try {
-                            try { sessionStorage.setItem('__novel_auto_play_next', 'true'); } catch(e){}
-                            if (window.__mediaSessionHandlers && typeof window.__mediaSessionHandlers['nexttrack'] === 'function') {
-                                try { window.__mediaSessionHandlers['nexttrack'](); return 'mediasession'; } catch(e){}
+                            // 1. Check direct JS methods on window for line/sentence skip
+                            if (window.reader && typeof window.reader.nextParagraph === 'function') {
+                                try { window.reader.nextParagraph(); return 'reader_nextParagraph'; } catch(e){}
+                            }
+                            if (window.reader && typeof window.reader.nextLine === 'function') {
+                                try { window.reader.nextLine(); return 'reader_nextLine'; } catch(e){}
+                            }
+                            if (typeof window.readNextSentence === 'function') {
+                                try { window.readNextSentence(); return 'readNextSentence'; } catch(e){}
+                            }
+                            if (typeof window.nextSentence === 'function') {
+                                try { window.nextSentence(); return 'nextSentence'; } catch(e){}
                             }
 
-                            // 1. Check direct JS methods on window
-                            if (window.reader && typeof window.reader.next === 'function') {
-                                try { window.reader.next(); return 'reader_next'; } catch(e){}
-                            }
-                            if (window.player && typeof window.player.next === 'function') {
-                                try { window.player.next(); return 'player_next'; } catch(e){}
-                            }
-
-                            // 2. Next paragraph/line/sentence controls on web readers (Right side buttons / floating toolbar)
+                            // 2. Next paragraph/line/sentence controls on web TTS reader UI
                             const nextParaSelectors = [
                                 '.tts-next', '.btn-next-para', '[data-action="next-para"]', '.reader-next',
-                                '.next-sentence', '.next-para', '[title*="ถัดไป" i]', '[title*="หน้า" i]',
-                                '[aria-label*="Next" i]', '[aria-label*="ถัดไป" i]', '.btn-next-sentence',
-                                '.btn-next-line', '#next-sentence-btn', '.audio-next', '.fa-step-forward',
-                                'button:has(.fa-step-forward)', 'a:has(.fa-step-forward)', '.novel-next-para',
-                                '[data-action="next"]', '.tts-btn-next', '#tts-next', '#btn-next', '.btn-next',
-                                '[data-cmd*="next" i]', '[data-role*="next" i]', '[class*="next-line" i]',
-                                '[class*="next-sentence" i]', '[class*="btn-next" i]'
+                                '.next-sentence', '.next-para', '[title*="ถัดไป" i]:not([title*="ตอน" i]):not([title*="บท" i])',
+                                '[aria-label*="Next" i]:not([aria-label*="Chapter" i])', '[aria-label*="ถัดไป" i]:not([aria-label*="ตอน" i])',
+                                '.btn-next-sentence', '.btn-next-line', '#next-sentence-btn', '.audio-next',
+                                '.novel-next-para', '.tts-btn-next', '#tts-next', '#btn-next-sentence',
+                                '[data-cmd*="next-sentence" i]', '[data-role*="next-para" i]', '[class*="next-line" i]',
+                                '[class*="next-sentence" i]', '.fa-step-forward', 'button:has(.fa-step-forward)',
+                                'button:has(.fa-forward)'
                             ];
                             for (let s of nextParaSelectors) {
                                 let el = document.querySelector(s);
@@ -907,7 +927,42 @@ class NovelTtsBridge(
                                 }
                             }
 
-                            // 3. If speech utterance active, fast forward
+                            // 3. Web Novel Reader Active Sentence / Element Navigation: Find next sentence/paragraph element in DOM and click it
+                            const activeSentenceSelectors = [
+                                '.reading', '.tts-reading', '.active-sentence', '.highlight-reading',
+                                '.highlight', '[data-reading="true"]', '.current-read', '.reading-active',
+                                '.active-para', '.speech-highlight', '.speaking', '.tts-active',
+                                'span.active', 'p.active', '.text-reading', '.current-sentence'
+                            ];
+                            let currentReadingEl = null;
+                            for (let sel of activeSentenceSelectors) {
+                                currentReadingEl = document.querySelector(sel);
+                                if (currentReadingEl) break;
+                            }
+
+                            if (currentReadingEl) {
+                                let nextEl = currentReadingEl.nextElementSibling;
+                                while (nextEl && nextEl.tagName !== 'P' && nextEl.tagName !== 'DIV' && nextEl.tagName !== 'SPAN' && !nextEl.classList.contains('sentence') && !nextEl.classList.contains('text-line')) {
+                                    nextEl = nextEl.nextElementSibling;
+                                }
+                                if (!nextEl && currentReadingEl.parentElement) {
+                                    let parentNext = currentReadingEl.parentElement.nextElementSibling;
+                                    if (parentNext) {
+                                        nextEl = parentNext.querySelector('p, .sentence, span, .text-line') || parentNext;
+                                    }
+                                }
+                                if (nextEl) {
+                                    try {
+                                        currentReadingEl.classList.remove('reading', 'tts-reading', 'active-sentence', 'highlight', 'current-read', 'reading-active', 'active');
+                                        nextEl.classList.add('reading', 'active-sentence');
+                                    } catch(e){}
+                                    simulateFullClick(nextEl);
+                                    nextEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                    return 'clicked_next_dom_element';
+                                }
+                            }
+
+                            // 4. If speech utterance active, finish it to trigger onend and jump to next sentence naturally
                             if (window.__android_active_utterance_id) {
                                 const currUtt = (window.__android_tts_utterances || {})[window.__android_active_utterance_id];
                                 if (currUtt && typeof currUtt.onend === 'function') {
@@ -918,73 +973,54 @@ class NovelTtsBridge(
                                 }
                             }
 
-                            if (typeof window.__novel_next_chapter === 'function') {
-                                try { window.__novel_next_chapter(); return 'custom_chapter'; } catch(e){}
+                            // 5. If playing HTML5 Audio, advance 10 seconds or trigger ended
+                            if (window.__active_html5_audio && !isNaN(window.__active_html5_audio.duration)) {
+                                try {
+                                    window.__active_html5_audio.currentTime = Math.min(window.__active_html5_audio.duration - 0.5, window.__active_html5_audio.currentTime + 10);
+                                    return 'forwarded_audio';
+                                } catch(e){}
                             }
 
-                            const chapterSelectors = [
-                                '#next_url', '.next_page', '#next-chapter', '.next-chapter', '.btn-next',
-                                'a[rel="next"]', 'button.next', 'a.next', 'a.nextChapter', '.chapter-next a',
-                                '#nextLink', '.nav-next a', 'a:has(.fa-chevron-right)', 'a:has(.fa-arrow-right)'
-                            ];
-                            for (let cs of chapterSelectors) {
-                                let cEl = document.querySelector(cs);
-                                if (cEl && cEl.offsetParent !== null) { simulateFullClick(cEl); return 'clicked_chapter_' + cs; }
-                            }
-                            for (let cs of chapterSelectors) {
-                                let cEl = document.querySelector(cs);
-                                if (cEl) { simulateFullClick(cEl); return 'clicked_chapter_' + cs; }
-                            }
-                            const xpathList = [
-                                "//a[contains(text(), 'ตอนต่อไป') or contains(text(), 'บทถัดไป') or contains(text(), 'ถัดไป') or contains(text(), 'ตอนหน้า')]",
-                                "//a[contains(text(), '下一章') or contains(text(), '下一页') or contains(text(), 'Next Chapter') or contains(text(), 'Next')]",
-                                "//button[contains(text(), 'ตอนต่อไป') or contains(text(), 'บทถัดไป') or contains(text(), 'ถัดไป') or contains(text(), 'Next')]"
-                            ];
-                            for (let xp of xpathList) {
-                                let res = document.evaluate(xp, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-                                if (res) { simulateFullClick(res); return 'clicked_xpath'; }
-                            }
-                            window.scrollBy({ top: window.innerHeight * 0.75, behavior: 'smooth' });
-                            return 'scrolled';
+                            // Scroll slightly down to follow reading
+                            window.scrollBy({ top: window.innerHeight * 0.35, behavior: 'smooth' });
+                            return 'scrolled_down';
                         } catch(e) {
-                            console.error("Next error", e);
+                            console.error("Next sentence error", e);
                             return false;
                         }
                     };
 
+                    // Move to Previous Sentence / Paragraph in the web TTS reader (NEVER hop chapter from notification button)
                     window.__android_tts_prev = function() {
                         try {
-                            try { sessionStorage.setItem('__novel_auto_play_next', 'true'); } catch(e){}
-
-                            // 1. Check MediaSession previoustrack handler first
-                            if (window.__mediaSessionHandlers && typeof window.__mediaSessionHandlers['previoustrack'] === 'function') {
-                                try { window.__mediaSessionHandlers['previoustrack'](); return 'mediasession'; } catch(e){}
+                            // 1. Check direct JS methods on window for previous line/sentence
+                            if (window.reader && typeof window.reader.prevParagraph === 'function') {
+                                try { window.reader.prevParagraph(); return 'reader_prevParagraph'; } catch(e){}
+                            }
+                            if (window.reader && typeof window.reader.prevLine === 'function') {
+                                try { window.reader.prevLine(); return 'reader_prevLine'; } catch(e){}
+                            }
+                            if (typeof window.readPrevSentence === 'function') {
+                                try { window.readPrevSentence(); return 'readPrevSentence'; } catch(e){}
+                            }
+                            if (typeof window.prevSentence === 'function') {
+                                try { window.prevSentence(); return 'prevSentence'; } catch(e){}
                             }
 
-                            // 2. Check direct JS methods on window
-                            if (window.reader && typeof window.reader.prev === 'function') {
-                                try { window.reader.prev(); return 'reader_prev'; } catch(e){}
-                            }
-                            if (window.player && typeof window.player.prev === 'function') {
-                                try { window.player.prev(); return 'player_prev'; } catch(e){}
-                            }
-                            if (typeof window.readPrev === 'function') {
-                                try { window.readPrev(); return 'readPrev'; } catch(e){}
-                            }
-
-                            // 3. Click previous paragraph/sentence controls on web novel readers (Floating right panel / toolbar)
+                            // 2. Previous paragraph/sentence controls on web novel readers
                             const prevParaSelectors = [
                                 '.tts-prev', '.btn-prev-para', '[data-action="prev-para"]', '.reader-prev',
-                                '.prev-sentence', '.prev-para', '[title*="ย้อน" i]', '[title*="ก่อน" i]',
-                                '[aria-label*="ย้อน" i]', '[aria-label*="ก่อน" i]', '[aria-label*="Previous" i]',
+                                '.prev-sentence', '.prev-para', '[title*="ย้อน" i]:not([title*="ตอน" i])',
+                                '[title*="ก่อน" i]:not([title*="ตอน" i]):not([title*="บท" i])',
+                                '[aria-label*="ย้อน" i]:not([aria-label*="ตอน" i])',
+                                '[aria-label*="ก่อน" i]:not([aria-label*="ตอน" i])',
+                                '[aria-label*="Previous" i]:not([aria-label*="Chapter" i])',
                                 '.btn-prev-sentence', '.btn-prev-speech', '#btn-prev-tts', '.tts-backward',
                                 '[data-action="prev-sentence"]', '.btn-prev-line', '#prev-sentence-btn',
-                                '.audio-prev', '.fa-step-backward', '.fa-backward',
-                                'button:has(.fa-step-backward)', 'a:has(.fa-step-backward)',
-                                'button:has(.fa-backward)', 'a:has(.fa-backward)',
-                                '.novel-prev-para', '[data-action="prev"]', '.tts-btn-prev', '#tts-prev',
-                                '#btn-prev', '.btn-prev', '[data-cmd*="prev" i]', '[data-role*="prev" i]',
-                                '[class*="prev-line" i]', '[class*="prev-sentence" i]', '[class*="btn-prev" i]'
+                                '.audio-prev', '.novel-prev-para', '.tts-btn-prev', '#tts-prev',
+                                '#btn-prev-sentence', '[data-cmd*="prev-sentence" i]', '[data-role*="prev-para" i]',
+                                '[class*="prev-line" i]', '[class*="prev-sentence" i]',
+                                '.fa-step-backward', 'button:has(.fa-step-backward)', '.fa-backward', 'button:has(.fa-backward)'
                             ];
                             for (let s of prevParaSelectors) {
                                 let el = document.querySelector(s);
@@ -1001,7 +1037,7 @@ class NovelTtsBridge(
                                 }
                             }
 
-                            // 4. Web Novel Reader Active Sentence / Element Navigation: Find previous element in DOM
+                            // 3. Web Novel Reader Active Sentence / Element Navigation: Find previous element in DOM
                             const activeSentenceSelectors = [
                                 '.reading', '.tts-reading', '.active-sentence', '.highlight-reading',
                                 '.highlight', '[data-reading="true"]', '.current-read', '.reading-active',
@@ -1036,7 +1072,7 @@ class NovelTtsBridge(
                                 }
                             }
 
-                            // 5. If playing HTML5 Audio, rewind 10s or restart current audio clip
+                            // 4. If playing HTML5 Audio, rewind 10s or restart current audio clip
                             if (window.__active_html5_audio) {
                                 try {
                                     if (window.__active_html5_audio.currentTime > 3) {
@@ -1049,42 +1085,11 @@ class NovelTtsBridge(
                                 } catch(e){}
                             }
 
-                            // 6. Custom chapter hook
-                            if (typeof window.__novel_prev_chapter === 'function') {
-                                try { window.__novel_prev_chapter(); return 'custom_chapter'; } catch(e){}
-                            }
-
-                            // 7. Click previous chapter link / button
-                            const chapterSelectors = [
-                                '#prev_url', '.prev_page', '#prev-chapter', '.prev-chapter', '.btn-prev',
-                                'a[rel="prev"]', 'button.prev', 'a.prev', 'a.prevChapter', '.chapter-prev a',
-                                '#prevLink', '.nav-prev a', '#btn-prev-chapter', '.btn-prev-chap', '.read-prev',
-                                'a:has(.fa-chevron-left)', 'a:has(.fa-arrow-left)', 'a:has(.fa-angle-left)',
-                                '.nav-previous a', '.previous-chapter a', '.chapter-nav-prev'
-                            ];
-                            for (let cs of chapterSelectors) {
-                                let cEl = document.querySelector(cs);
-                                if (cEl && cEl.offsetParent !== null) { simulateFullClick(cEl); return 'clicked_chapter_' + cs; }
-                            }
-                            for (let cs of chapterSelectors) {
-                                let cEl = document.querySelector(cs);
-                                if (cEl) { simulateFullClick(cEl); return 'clicked_chapter_' + cs; }
-                            }
-
-                            // 8. XPath fallback for Thai / English previous chapter buttons
-                            const xpathList = [
-                                "//a[contains(text(), 'ตอนก่อนหน้า') or contains(text(), 'บทก่อนหน้า') or contains(text(), 'ก่อนหน้า') or contains(text(), 'ตอนที่แล้ว')]",
-                                "//a[contains(text(), '上一章') or contains(text(), '上一页') or contains(text(), 'Previous Chapter') or contains(text(), 'Prev')]",
-                                "//button[contains(text(), 'ตอนก่อนหน้า') or contains(text(), 'บทก่อนหน้า') or contains(text(), 'ก่อนหน้า') or contains(text(), 'ตอนที่แล้ว') or contains(text(), 'Prev')]"
-                            ];
-                            for (let xp of xpathList) {
-                                let res = document.evaluate(xp, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-                                if (res) { simulateFullClick(res); return 'clicked_xpath'; }
-                            }
-                            window.scrollBy({ top: -window.innerHeight * 0.75, behavior: 'smooth' });
-                            return 'scrolled';
+                            // Scroll slightly up
+                            window.scrollBy({ top: -window.innerHeight * 0.35, behavior: 'smooth' });
+                            return 'scrolled_up';
                         } catch(e) {
-                            console.error("Prev error", e);
+                            console.error("Prev sentence error", e);
                             return false;
                         }
                     };

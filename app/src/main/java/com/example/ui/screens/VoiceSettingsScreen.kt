@@ -3,6 +3,7 @@ package com.example.ui.screens
 import android.content.Intent
 import android.provider.Settings
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -21,6 +22,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.OpenInNew
@@ -30,6 +32,7 @@ import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -60,6 +63,7 @@ import com.example.ui.theme.EmeraldSuccess
 @Composable
 fun VoiceSettingsScreen(
     service: TtsForegroundService?,
+    onNavigateBack: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -67,6 +71,9 @@ fun VoiceSettingsScreen(
     var testSentence by remember {
         mutableStateOf("หลินเฟิงก้าวออกจากตำหนักโบราณ พลังปราณฟ้าดินพลันหมุนวนรอบกายอย่างรุนแรง")
     }
+
+    // Catch hardware back button or gesture to return to web reader
+    BackHandler(onBack = onNavigateBack)
 
     val openRomTtsSettings = {
         val intentsToTry = listOf(
@@ -90,14 +97,55 @@ fun VoiceSettingsScreen(
         }
     }
 
-    LazyColumn(
+    Column(
         modifier = modifier
             .fillMaxSize()
             .background(Color(0xFF0F0F0F))
-            .padding(16.dp)
-            .testTag("voice_settings_screen"),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
+        // Top Navigation Bar with Back Button
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(DarkSurface)
+                .padding(horizontal = 8.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(
+                onClick = onNavigateBack,
+                modifier = Modifier
+                    .size(40.dp)
+                    .testTag("voice_settings_back_button")
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "ย้อนกลับไปหน้าเว็บนิยาย",
+                    tint = Color.White
+                )
+            }
+            Spacer(modifier = Modifier.width(6.dp))
+            Column {
+                Text(
+                    text = "ตั้งค่าเสียงอ่าน (TTS)",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+                Text(
+                    text = "ปรับแต่งความเร็ว ระดับเสียง และเอนจินเสียงของระบบ",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AmberPrimary,
+                    fontSize = 11.sp
+                )
+            }
+        }
+
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp)
+                .testTag("voice_settings_screen"),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
         // Status & Active Engine Card
         item {
             Card(
@@ -335,4 +383,5 @@ fun VoiceSettingsScreen(
             Spacer(modifier = Modifier.height(40.dp))
         }
     }
+}
 }

@@ -17,6 +17,7 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -177,6 +178,15 @@ fun WebCompanionScreen(
                     isTranslating = false
                 }
             }
+        }
+    }
+
+    // Handle back button for menu dismissal or web navigation history
+    BackHandler(enabled = showChromeMenu || canGoBack) {
+        if (showChromeMenu) {
+            showChromeMenu = false
+        } else if (canGoBack) {
+            webViewInstance?.goBack()
         }
     }
 
@@ -790,7 +800,13 @@ fun WebCompanionScreen(
                             cacheMode = WebSettings.LOAD_DEFAULT
                             mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                             userAgentString = "$userAgentString NovelAI-AndroidBridge/1.0"
+                            // Prevent background timer suspension
+                            useWideViewPort = true
+                            loadWithOverviewMode = true
                         }
+
+                        // Prevent background throttling of timers in WebView
+                        resumeTimers()
 
                         // Attach the Native TTS JavaScript Bridge
                         addJavascriptInterface(bridge, NovelTtsBridge.JS_INTERFACE_NAME)
@@ -931,16 +947,21 @@ fun WebCompanionScreen(
                                 }
 
                                 // Auto-continue reading next/prev chapter when triggered by background or user navigation
-                                // Use progressive attempts (400ms, 1200ms, 2500ms) to ensure dynamically rendered reader buttons are caught immediately
+                                // Enhanced with persistent polling interval to ensure slow or background-throttled pages never get stuck
                                 val autoPlayScript = """
                                     (function() {
                                         try {
-                                            if (sessionStorage.getItem('__novel_auto_play_next') === 'true') {
+                                            if (sessionStorage.getItem('__novel_auto_play_next') !== 'true') return;
+
+                                            function tryClickPlay() {
+                                                if (sessionStorage.getItem('__novel_auto_play_next') !== 'true') return true;
+
                                                 const playSelectors = [
                                                     '.btn-read', '.btn-play', '#btn-tts', '#read-novel', '[data-action="auto-read"]',
                                                     '.tts-play', '#play-button', '.reader-play', '.audio-play', '.play-btn', '.btn-read-play',
                                                     '.tts-btn', '#tts-play', 'button[title*="อ่าน"]', 'button[title*="Play"]',
-                                                    '[aria-label*="Play"]', '[aria-label*="อ่าน"]', '[title*="เล่น"]', '[title*="Play"]'
+                                                    '[aria-label*="Play"]', '[aria-label*="อ่าน"]', '[title*="เล่น"]', '[title*="Play"]',
+                                                    'button:has(.fa-play)', '.fa-play', '[data-action="read"]', '.btn-start-read'
                                                 ];
                                                 for (let sel of playSelectors) {
                                                     let btn = document.querySelector(sel);
@@ -956,15 +977,40 @@ fun WebCompanionScreen(
                                                     window.reader.play();
                                                     return true;
                                                 }
+                                                if (typeof window.readNovel === 'function') {
+                                                    sessionStorage.removeItem('__novel_auto_play_next');
+                                                    window.readNovel();
+                                                    return true;
+                                                }
+                                                if (typeof window.startTts === 'function') {
+                                                    sessionStorage.removeItem('__novel_auto_play_next');
+                                                    window.startTts();
+                                                    return true;
+                                                }
+                                                return false;
                                             }
+
+                                            // Attempt immediately
+                                            if (tryClickPlay()) return;
+
+                                            // If not found yet (e.g. dynamic rendering in background), poll every 500ms up to 20 times (10 seconds)
+                                            if (window.__novel_auto_play_timer) clearInterval(window.__novel_auto_play_timer);
+                                            var count = 0;
+                                            window.__novel_auto_play_timer = setInterval(function() {
+                                                count++;
+                                                if (tryClickPlay() || count > 20) {
+                                                    clearInterval(window.__novel_auto_play_timer);
+                                                    window.__novel_auto_play_timer = null;
+                                                }
+                                            }, 500);
                                         } catch(e) {}
-                                        return false;
                                     })();
                                 """.trimIndent()
 
-                                view?.postDelayed({ view.evaluateJavascript(autoPlayScript, null) }, 400)
-                                view?.postDelayed({ view.evaluateJavascript(autoPlayScript, null) }, 1200)
+                                view?.postDelayed({ view.evaluateJavascript(autoPlayScript, null) }, 300)
+                                view?.postDelayed({ view.evaluateJavascript(autoPlayScript, null) }, 1000)
                                 view?.postDelayed({ view.evaluateJavascript(autoPlayScript, null) }, 2500)
+                                view?.postDelayed({ view.evaluateJavascript(autoPlayScript, null) }, 5000)
                             }
 
                             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {

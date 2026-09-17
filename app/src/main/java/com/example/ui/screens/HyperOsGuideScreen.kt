@@ -1,8 +1,13 @@
 package com.example.ui.screens
 
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
+import android.os.PowerManager
 import android.provider.Settings
+import androidx.activity.compose.BackHandler
+import com.example.BuildConfig
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -22,6 +27,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BatteryAlert
 import androidx.compose.material.icons.filled.CheckCircle
@@ -34,6 +40,7 @@ import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -62,9 +69,13 @@ import com.example.ui.theme.EmeraldSuccess
 @Composable
 fun HyperOsGuideScreen(
     service: TtsForegroundService?,
+    onNavigateBack: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+
+    // Catch hardware back button or gesture to return to web reader
+    BackHandler(onBack = onNavigateBack)
 
     val openAppSettings = {
         try {
@@ -78,14 +89,78 @@ fun HyperOsGuideScreen(
         }
     }
 
-    LazyColumn(
+    val requestIgnoreBatteryOptimization = {
+        try {
+            val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+            val isIgnoring = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                powerManager?.isIgnoringBatteryOptimizations(context.packageName) == true
+            } else {
+                true
+            }
+
+            if (!isIgnoring && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = Uri.parse("package:${context.packageName}")
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                context.startActivity(intent)
+            } else {
+                openAppSettings()
+            }
+        } catch (e: Exception) {
+            openAppSettings()
+        }
+    }
+
+    Column(
         modifier = modifier
             .fillMaxSize()
             .background(Color(0xFF0F0F0F))
-            .padding(16.dp)
-            .testTag("hyperos_guide_screen"),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        // Top Navigation Bar with Back Button
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(DarkSurface)
+                .padding(horizontal = 8.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(
+                onClick = onNavigateBack,
+                modifier = Modifier
+                    .size(40.dp)
+                    .testTag("hyperos_guide_back_button")
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "ย้อนกลับไปหน้าเว็บนิยาย",
+                    tint = Color.White
+                )
+            }
+            Spacer(modifier = Modifier.width(6.dp))
+            Column {
+                Text(
+                    text = "ล็อกแอปทำงานเบื้องหลัง",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+                Text(
+                    text = "คู่มือป้องกันเสียงดับสำหรับ HyperOS / Xiaomi / Android",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AmberPrimary,
+                    fontSize = 11.sp
+                )
+            }
+        }
+
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp)
+                .testTag("hyperos_guide_screen"),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
         // App Profile & Hero Cover Card
         item {
             Card(
@@ -129,12 +204,32 @@ fun HyperOsGuideScreen(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    Text(
-                        text = "TTS เบื้องหลัง",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = Color.White
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Text(
+                            text = "TTS เบื้องหลัง",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color.White
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(AmberPrimary.copy(alpha = 0.2f))
+                                .border(1.dp, AmberPrimary.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "v${BuildConfig.VERSION_NAME}",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = AmberPrimary
+                            )
+                        }
+                    }
 
                     Spacer(modifier = Modifier.height(4.dp))
 
@@ -209,7 +304,7 @@ fun HyperOsGuideScreen(
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    // Shortcut to App Settings
+                    // Shortcut to App Settings & Battery Whitelist
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -219,7 +314,7 @@ fun HyperOsGuideScreen(
                                     listOf(AmberPrimary, AmberSecondary)
                                 )
                             )
-                            .clickable { openAppSettings() }
+                            .clickable { requestIgnoreBatteryOptimization() }
                             .padding(vertical = 11.dp)
                             .testTag("open_app_settings_button"),
                         contentAlignment = Alignment.Center
@@ -355,6 +450,7 @@ fun HyperOsGuideScreen(
             Spacer(modifier = Modifier.height(50.dp))
         }
     }
+}
 }
 
 @Composable

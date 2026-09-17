@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -126,6 +127,11 @@ fun MainAppContainer(
     var currentScreen by remember { mutableStateOf(AppScreen.WEB_READER) }
     var isBottomNavVisible by remember { mutableStateOf(false) }
 
+    // Intercept back button when not on web reader screen to return to reader instead of exiting app
+    BackHandler(enabled = currentScreen != AppScreen.WEB_READER) {
+        currentScreen = AppScreen.WEB_READER
+    }
+
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = Color(0xFF0F0F0F),
@@ -179,7 +185,8 @@ fun MainAppContainer(
                         .background(Color(0xFF0F0F0F))
                 ) {
                     VoiceSettingsScreen(
-                        service = service
+                        service = service,
+                        onNavigateBack = { currentScreen = AppScreen.WEB_READER }
                     )
                 }
             }
@@ -193,7 +200,8 @@ fun MainAppContainer(
                         .background(Color(0xFF0F0F0F))
                 ) {
                     HyperOsGuideScreen(
-                        service = service
+                        service = service,
+                        onNavigateBack = { currentScreen = AppScreen.WEB_READER }
                     )
                 }
             }
