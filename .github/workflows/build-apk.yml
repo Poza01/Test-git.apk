@@ -9,6 +9,8 @@ jobs:
   build:
     name: Build Android APK
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout Code
@@ -53,3 +55,27 @@ jobs:
           name: NovelAI-TTS-Debug-APK
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 14
+
+      - name: Publish APK to GitHub Releases
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG_NAME="latest"
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            TAG_NAME="${{ github.ref_name }}"
+          fi
+
+          echo "Target Release Tag: $TAG_NAME"
+          APK_FILE=$(ls app/build/outputs/apk/debug/*.apk | head -n 1)
+
+          if [ -n "$APK_FILE" ] && [ -f "$APK_FILE" ]; then
+            echo "Publishing $APK_FILE to release $TAG_NAME..."
+            # Try to upload to existing release first, if not found, create new release
+            gh release upload "$TAG_NAME" "$APK_FILE" --clobber || \
+            gh release create "$TAG_NAME" "$APK_FILE" \
+              --title "NovelAI TTS (Latest APK)" \
+              --notes "ดาวน์โหลดไฟล์ APK เวอร์ชันล่าสุดที่คอมไพล์สำเร็จ (อัปเดตอัตโนมัติจาก Commit: ${{ github.sha }})" \
+              --latest
+          else
+            echo "No APK file found to release."
+          fi
