@@ -941,6 +941,14 @@ class NovelTtsBridge(
                             }
                             return;
                         }
+
+                        // Block native speech processing if Online TTS (Google / Microsoft TTS) is active!
+                        if (window.__is_online_tts_active || (window.__active_html5_audio && !window.__active_html5_audio.paused)) {
+                            console.log("[NovelTtsBridge] Suppressing Web Speech queue item because Online TTS stream is active");
+                            isProcessingQueue = false;
+                            return;
+                        }
+
                         const item = window.__android_speech_queue.shift();
                         isProcessingQueue = true;
                         if (window.speechSynthesis) {
@@ -979,6 +987,13 @@ class NovelTtsBridge(
                         speak: function(utterance) {
                             try {
                                 if (!utterance) return;
+
+                                // Block native speech synthesis if Online TTS (Google / Microsoft TTS) is active!
+                                if (window.__is_online_tts_active || (window.__active_html5_audio && !window.__active_html5_audio.paused)) {
+                                    console.log("[NovelTtsBridge] Blocking speechSynthesis.speak because Online TTS stream is active");
+                                    return;
+                                }
+
                                 const text = (typeof utterance === 'string') ? utterance : (utterance.text || '');
                                 if (!text || text.trim().length === 0) {
                                     setTimeout(() => dispatchUtteranceEvent(utterance, 'end'), 10);
@@ -1106,17 +1121,13 @@ class NovelTtsBridge(
                                 webAudioPauseDebounceTimer = null;
                             }
                             if (webAudioDebounceTimer) clearTimeout(webAudioDebounceTimer);
-                            webAudioDebounceTimer = setTimeout(function() {
-                                try {
-                                    if (!audio || audio.paused) return;
-                                    const engine = getAudioEngineName(audio);
-                                    const title = (document.querySelector('h1, .chapter-title, #chapter-title, .title') || {}).innerText || document.title || "อ่านนิยายเว็บ";
-                                    const text = getNovelReadingText();
-                                    if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.onWebAudioStarted === 'function') {
-                                        window.AndroidTtsBridge.onWebAudioStarted(title.trim(), text, engine);
-                                    }
-                                } catch(e) {}
-                            }, 50);
+                            // Immediately inform Android service to update notification icon to || without delay
+                            const engine = getAudioEngineName(audio);
+                            const title = (document.querySelector('h1, .chapter-title, #chapter-title, .title') || {}).innerText || document.title || "อ่านนิยายเว็บ";
+                            const text = getNovelReadingText();
+                            if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.onWebAudioStarted === 'function') {
+                                window.AndroidTtsBridge.onWebAudioStarted(title.trim(), text, engine);
+                            }
                         } catch(e) {}
                     }
         """
@@ -1179,6 +1190,25 @@ class NovelTtsBridge(
                             }, 300);
                         } catch(e) {}
                     }
+
+                    // Deep Interception of HTMLMediaElement prototype play/pause to capture every dynamic Audio instance
+                    try {
+                        const origMediaPlay = HTMLMediaElement.prototype.play;
+                        HTMLMediaElement.prototype.play = function() {
+                            try {
+                                notifyAudioPlaying(this);
+                            } catch(e) {}
+                            return origMediaPlay.apply(this, arguments);
+                        };
+
+                        const origMediaPause = HTMLMediaElement.prototype.pause;
+                        HTMLMediaElement.prototype.pause = function() {
+                            try {
+                                notifyAudioPaused(this);
+                            } catch(e) {}
+                            return origMediaPause.apply(this, arguments);
+                        };
+                    } catch(e) {}
 
                     // Safe, non-intrusive event capture on window
                     try {
@@ -1290,17 +1320,19 @@ class NovelTtsBridge(
                                 }
                             }
 
-                            // 4. Click web reader Play/Resume button to sync web reader UI to Playing state (||)
-                            const playBtn = document.querySelector(
-                                '.tts-play:not(.tts-pause):not(.pause):not(.active), ' +
-                                '.btn-play:not(.btn-pause):not(.pause):not(.active), ' +
-                                '[data-action="play"], #play-button:not(.paused), .reader-play:not(.active), ' +
-                                '.audio-play:not(.paused), .play-btn:not(.active), .btn-read-play, ' +
-                                '[aria-label*="Play" i], [title*="เล่น" i], [title*="Play" i], [aria-label*="เล่น" i], ' +
-                                '.fa-play, [data-action="tts-play"], #btn-tts-play'
-                            );
-                            if (playBtn && !playBtn.classList.contains('fa-pause') && !playBtn.classList.contains('pause') && !playBtn.classList.contains('active')) {
-                                simulateFullClick(playBtn);
+                            // 4. Click web reader Play/Resume button only if audio elements didn't already resume
+                            if (!didResumeSomething) {
+                                const playBtn = document.querySelector(
+                                    '.tts-play:not(.tts-pause):not(.pause):not(.active), ' +
+                                    '.btn-play:not(.btn-pause):not(.pause):not(.active), ' +
+                                    '[data-action="play"], #play-button:not(.paused), .reader-play:not(.active), ' +
+                                    '.audio-play:not(.paused), .play-btn:not(.active), .btn-read-play, ' +
+                                    '[aria-label*="Play" i], [title*="เล่น" i], [title*="Play" i], [aria-label*="เล่น" i], ' +
+                                    '.fa-play, [data-action="tts-play"], #btn-tts-play'
+                                );
+                                if (playBtn && !playBtn.classList.contains('fa-pause') && !playBtn.classList.contains('pause') && !playBtn.classList.contains('active')) {
+                                    simulateFullClick(playBtn);
+                                }
                             }
                             return true;
                         } catch(e) {

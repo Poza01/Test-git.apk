@@ -17,6 +17,7 @@ import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.speech.tts.Voice
 import android.util.Log
+import android.view.View
 import android.widget.RemoteViews
 import androidx.core.app.NotificationCompat
 import com.example.MainActivity
@@ -311,10 +312,10 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
         val cleanText = text.trim()
         if (cleanText.isBlank()) return
 
-        // If online audio stream is currently active and playing (Google/Microsoft TTS),
+        // If online audio stream is currently active or is current mode (Google/Microsoft TTS),
         // reject/ignore Web Speech API requests so device TTS never overlaps!
-        if (currentAudioSourceType == AudioSourceType.WEB_AUDIO_STREAM && isWebAudioPlaying) {
-            Log.d(TAG, "Ignoring speakFromWeb because WEB_AUDIO_STREAM (Google/Microsoft TTS) is actively playing")
+        if (currentAudioSourceType == AudioSourceType.WEB_AUDIO_STREAM) {
+            Log.d(TAG, "Ignoring speakFromWeb because WEB_AUDIO_STREAM (Google/Microsoft TTS) is active")
             return
         }
 
@@ -725,6 +726,22 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
                 setOnClickPendingIntent(R.id.notif_root, pendingContentIntent)
             }
 
+            val expandedViews = RemoteViews(packageName, R.layout.notification_player_expanded).apply {
+                setTextViewText(R.id.notif_big_title, title)
+                setTextViewText(R.id.notif_big_excerpt, paraInfo)
+                setViewVisibility(R.id.notif_big_badge_playing, if (isPlaying) View.VISIBLE else View.GONE)
+                setViewVisibility(R.id.notif_big_badge_paused, if (isPlaying) View.GONE else View.VISIBLE)
+                setImageViewResource(
+                    R.id.btn_notif_big_play_pause,
+                    if (isPlaying) R.drawable.ic_notif_pause_dark else R.drawable.ic_notif_play_dark
+                )
+                setOnClickPendingIntent(R.id.btn_notif_big_prev, pendingPrev)
+                setOnClickPendingIntent(R.id.btn_notif_big_play_pause, pendingPlayPause)
+                setOnClickPendingIntent(R.id.btn_notif_big_next, pendingNext)
+                setOnClickPendingIntent(R.id.btn_notif_big_stop, pendingStop)
+                setOnClickPendingIntent(R.id.notif_big_root, pendingContentIntent)
+            }
+
             NotificationCompat.Builder(this, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_notif_play)
                 .setContentIntent(pendingContentIntent)
@@ -734,6 +751,7 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
                 .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
                 .setStyle(NotificationCompat.DecoratedCustomViewStyle())
                 .setCustomContentView(compactViews)
+                .setCustomBigContentView(expandedViews)
                 .build()
         } catch (e: Exception) {
             Log.e("TtsService", "Error creating custom notification, fallback to standard", e)
