@@ -13,6 +13,9 @@ import android.os.Binder
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.speech.tts.Voice
@@ -726,22 +729,6 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
                 setOnClickPendingIntent(R.id.notif_root, pendingContentIntent)
             }
 
-            val expandedViews = RemoteViews(packageName, R.layout.notification_player_expanded).apply {
-                setTextViewText(R.id.notif_big_title, title)
-                setTextViewText(R.id.notif_big_excerpt, paraInfo)
-                setViewVisibility(R.id.notif_big_badge_playing, if (isPlaying) View.VISIBLE else View.GONE)
-                setViewVisibility(R.id.notif_big_badge_paused, if (isPlaying) View.GONE else View.VISIBLE)
-                setImageViewResource(
-                    R.id.btn_notif_big_play_pause,
-                    if (isPlaying) R.drawable.ic_notif_pause_dark else R.drawable.ic_notif_play_dark
-                )
-                setOnClickPendingIntent(R.id.btn_notif_big_prev, pendingPrev)
-                setOnClickPendingIntent(R.id.btn_notif_big_play_pause, pendingPlayPause)
-                setOnClickPendingIntent(R.id.btn_notif_big_next, pendingNext)
-                setOnClickPendingIntent(R.id.btn_notif_big_stop, pendingStop)
-                setOnClickPendingIntent(R.id.notif_big_root, pendingContentIntent)
-            }
-
             NotificationCompat.Builder(this, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_notif_play)
                 .setContentIntent(pendingContentIntent)
@@ -751,7 +738,6 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
                 .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
                 .setStyle(NotificationCompat.DecoratedCustomViewStyle())
                 .setCustomContentView(compactViews)
-                .setCustomBigContentView(expandedViews)
                 .build()
         } catch (e: Exception) {
             Log.e("TtsService", "Error creating custom notification, fallback to standard", e)
@@ -786,7 +772,33 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
+    private fun triggerClickHaptic() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val vibratorManager = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
+                vibratorManager?.defaultVibrator?.vibrate(
+                    VibrationEffect.createPredefined(VibrationEffect.EFFECT_CLICK)
+                )
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+                vibrator?.vibrate(
+                    VibrationEffect.createOneShot(20L, VibrationEffect.DEFAULT_AMPLITUDE)
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+                @Suppress("DEPRECATION")
+                vibrator?.vibrate(20L)
+            }
+        } catch (e: Exception) {
+            // Ignore if vibration is not supported on device
+        }
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action != null) {
+            triggerClickHaptic()
+        }
         when (intent?.action) {
             ACTION_TOGGLE_PLAY_PAUSE -> togglePlayPause()
             ACTION_PLAY -> resume()
