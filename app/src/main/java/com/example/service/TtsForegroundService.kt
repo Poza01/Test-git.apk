@@ -46,6 +46,13 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
 
     private val prefs by lazy { com.example.data.NovelPreferences(applicationContext) }
 
+    enum class AudioSourceType {
+        LOCAL_DOCUMENT,
+        WEB_SPEECH_API,
+        WEB_AUDIO_STREAM
+    }
+
+    private var currentAudioSourceType: AudioSourceType = AudioSourceType.LOCAL_DOCUMENT
     private var currentUtteranceId = 0L
     private var pendingSpeechAction: (() -> Unit)? = null
     private var currentWebUtteranceId: String? = null
@@ -305,6 +312,7 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
         if (cleanText.isBlank()) return
 
         webIdleJob?.cancel()
+        currentAudioSourceType = AudioSourceType.WEB_SPEECH_API
         currentWebUtteranceId = webUtteranceId
         isWebAudioPlaying = false
 
@@ -341,7 +349,11 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
 
     fun onWebAudioStarted(title: String, text: String, engineName: String) {
         webIdleJob?.cancel()
+        currentAudioSourceType = AudioSourceType.WEB_AUDIO_STREAM
         isWebAudioPlaying = true
+        if (tts?.isSpeaking == true) {
+            tts?.stop()
+        }
         _playbackState.update {
             it.copy(
                 isPlaying = true,
@@ -389,6 +401,8 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
             return
         }
 
+        currentAudioSourceType = AudioSourceType.LOCAL_DOCUMENT
+
         _playbackState.update {
             it.copy(
                 activeParagraphIndex = index,
@@ -434,35 +448,41 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
         _playbackState.update { it.copy(isPlaying = true, isPaused = false) }
         updateForegroundNotification()
 
-        if (state.activeParagraphIndex >= 0 && state.activeParagraphIndex < state.paragraphs.size) {
-            speakParagraphInternal(state.activeParagraphIndex)
-        } else if (state.paragraphs.isNotEmpty()) {
-            speakParagraphInternal(0)
-        } else if (isWebAudioPlaying) {
-            // Web Audio (HTML5 <audio>): resume via WebView controls
-            com.example.bridge.NovelTtsBridge.notifyPlayResumeFromService()
-        } else if (state.currentText.isNotBlank() && state.currentText != "กำลังเล่นเสียง...") {
-            val uttId = currentWebUtteranceId ?: "0"
-            val utteranceId = "web_utt_$uttId"
-            tts?.speak(state.currentText, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
-            com.example.bridge.NovelTtsBridge.notifyPlayResumeFromService()
-        } else if (webSpeechHistory.isNotEmpty()) {
-            val lastItem = webSpeechHistory.getOrNull(webHistoryIndex) ?: webSpeechHistory.last()
-            currentWebUtteranceId = lastItem.utteranceId
-            val utteranceId = "web_utt_${lastItem.utteranceId}"
-            _playbackState.update {
-                it.copy(
-                    chapterTitle = lastItem.title.ifBlank { "อ่านนิยายเว็บ" },
-                    currentText = lastItem.text,
-                    isPlaying = true,
-                    isPaused = false
-                )
+        when (currentAudioSourceType) {
+            AudioSourceType.LOCAL_DOCUMENT -> {
+                if (state.activeParagraphIndex >= 0 && state.activeParagraphIndex < state.paragraphs.size) {
+                    speakParagraphInternal(state.activeParagraphIndex)
+                } else if (state.paragraphs.isNotEmpty()) {
+                    speakParagraphInternal(0)
+                }
             }
-            tts?.speak(lastItem.text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
-            com.example.bridge.NovelTtsBridge.notifyPlayResumeFromService()
-        } else {
-            // Web Audio (Google / Microsoft) or general web reader
-            com.example.bridge.NovelTtsBridge.notifyPlayResumeFromService()
+            AudioSourceType.WEB_AUDIO_STREAM -> {
+                // Online audio stream (Google / Microsoft TTS)
+                // NEVER speak with native TTS! Only notify the web reader to resume audio playback
+                com.example.bridge.NovelTtsBridge.notifyPlayResumeFromService()
+            }
+            AudioSourceType.WEB_SPEECH_API -> {
+                // Device TTS (Web Speech API)
+                if (state.currentText.isNotBlank() && state.currentText != "กำลังเล่นเสียง...") {
+                    val uttId = currentWebUtteranceId ?: "0"
+                    val utteranceId = "web_utt_$uttId"
+                    tts?.speak(state.currentText, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+                } else if (webSpeechHistory.isNotEmpty()) {
+                    val lastItem = webSpeechHistory.getOrNull(webHistoryIndex) ?: webSpeechHistory.last()
+                    currentWebUtteranceId = lastItem.utteranceId
+                    val utteranceId = "web_utt_${lastItem.utteranceId}"
+                    _playbackState.update {
+                        it.copy(
+                            chapterTitle = lastItem.title.ifBlank { "อ่านนิยายเว็บ" },
+                            currentText = lastItem.text,
+                            isPlaying = true,
+                            isPaused = false
+                        )
+                    }
+                    tts?.speak(lastItem.text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+                }
+                com.example.bridge.NovelTtsBridge.notifyPlayResumeFromService()
+            }
         }
     }
 
@@ -509,55 +529,77 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
 
     fun skipNext() {
         val state = _playbackState.value
-        if (state.paragraphs.isNotEmpty() && state.activeParagraphIndex < state.paragraphs.size - 1) {
-            val nextIndex = (state.activeParagraphIndex + 1).coerceAtMost(state.paragraphs.size - 1)
-            speakParagraphInternal(nextIndex)
-        } else if (webSpeechHistory.isNotEmpty() && webHistoryIndex >= 0 && webHistoryIndex < webSpeechHistory.size - 1) {
-            webHistoryIndex++
-            val nextItem = webSpeechHistory[webHistoryIndex]
-            webIdleJob?.cancel()
-            currentWebUtteranceId = nextItem.utteranceId
-            _playbackState.update {
-                it.copy(
-                    chapterTitle = nextItem.title.ifBlank { "อ่านนิยายเว็บ" },
-                    currentText = nextItem.text,
-                    isPlaying = true,
-                    isPaused = false
-                )
+        when (currentAudioSourceType) {
+            AudioSourceType.LOCAL_DOCUMENT -> {
+                if (state.paragraphs.isNotEmpty() && state.activeParagraphIndex < state.paragraphs.size - 1) {
+                    val nextIndex = (state.activeParagraphIndex + 1).coerceAtMost(state.paragraphs.size - 1)
+                    speakParagraphInternal(nextIndex)
+                }
             }
-            updateForegroundNotification()
-            val utteranceId = "web_utt_${nextItem.utteranceId}"
-            tts?.speak(nextItem.text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
-            com.example.bridge.NovelTtsBridge.notifyNextFromService()
-        } else {
-            com.example.bridge.NovelTtsBridge.notifyNextFromService()
+            AudioSourceType.WEB_AUDIO_STREAM -> {
+                // Online audio stream (Google / Microsoft TTS)
+                // NEVER speak with native TTS! Only notify the web reader to skip to the next chunk/sentence
+                com.example.bridge.NovelTtsBridge.notifyNextFromService()
+            }
+            AudioSourceType.WEB_SPEECH_API -> {
+                // Device TTS (Web Speech API)
+                if (webSpeechHistory.isNotEmpty() && webHistoryIndex >= 0 && webHistoryIndex < webSpeechHistory.size - 1) {
+                    webHistoryIndex++
+                    val nextItem = webSpeechHistory[webHistoryIndex]
+                    webIdleJob?.cancel()
+                    currentWebUtteranceId = nextItem.utteranceId
+                    _playbackState.update {
+                        it.copy(
+                            chapterTitle = nextItem.title.ifBlank { "อ่านนิยายเว็บ" },
+                            currentText = nextItem.text,
+                            isPlaying = true,
+                            isPaused = false
+                        )
+                    }
+                    updateForegroundNotification()
+                    val utteranceId = "web_utt_${nextItem.utteranceId}"
+                    tts?.speak(nextItem.text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+                }
+                com.example.bridge.NovelTtsBridge.notifyNextFromService()
+            }
         }
     }
 
     fun skipPrevious() {
         val state = _playbackState.value
-        if (state.paragraphs.isNotEmpty() && state.activeParagraphIndex > 0) {
-            val prevIndex = (state.activeParagraphIndex - 1).coerceAtLeast(0)
-            speakParagraphInternal(prevIndex)
-        } else if (webSpeechHistory.isNotEmpty() && webHistoryIndex > 0) {
-            webHistoryIndex--
-            val prevItem = webSpeechHistory[webHistoryIndex]
-            webIdleJob?.cancel()
-            currentWebUtteranceId = prevItem.utteranceId
-            _playbackState.update {
-                it.copy(
-                    chapterTitle = prevItem.title.ifBlank { "อ่านนิยายเว็บ" },
-                    currentText = prevItem.text,
-                    isPlaying = true,
-                    isPaused = false
-                )
+        when (currentAudioSourceType) {
+            AudioSourceType.LOCAL_DOCUMENT -> {
+                if (state.paragraphs.isNotEmpty() && state.activeParagraphIndex > 0) {
+                    val prevIndex = (state.activeParagraphIndex - 1).coerceAtLeast(0)
+                    speakParagraphInternal(prevIndex)
+                }
             }
-            updateForegroundNotification()
-            val utteranceId = "web_utt_${prevItem.utteranceId}"
-            tts?.speak(prevItem.text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
-            com.example.bridge.NovelTtsBridge.notifyPrevFromService()
-        } else {
-            com.example.bridge.NovelTtsBridge.notifyPrevFromService()
+            AudioSourceType.WEB_AUDIO_STREAM -> {
+                // Online audio stream (Google / Microsoft TTS)
+                // NEVER speak with native TTS! Only notify the web reader to skip to the previous chunk/sentence
+                com.example.bridge.NovelTtsBridge.notifyPrevFromService()
+            }
+            AudioSourceType.WEB_SPEECH_API -> {
+                // Device TTS (Web Speech API)
+                if (webSpeechHistory.isNotEmpty() && webHistoryIndex > 0) {
+                    webHistoryIndex--
+                    val prevItem = webSpeechHistory[webHistoryIndex]
+                    webIdleJob?.cancel()
+                    currentWebUtteranceId = prevItem.utteranceId
+                    _playbackState.update {
+                        it.copy(
+                            chapterTitle = prevItem.title.ifBlank { "อ่านนิยายเว็บ" },
+                            currentText = prevItem.text,
+                            isPlaying = true,
+                            isPaused = false
+                        )
+                    }
+                    updateForegroundNotification()
+                    val utteranceId = "web_utt_${prevItem.utteranceId}"
+                    tts?.speak(prevItem.text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+                }
+                com.example.bridge.NovelTtsBridge.notifyPrevFromService()
+            }
         }
     }
 

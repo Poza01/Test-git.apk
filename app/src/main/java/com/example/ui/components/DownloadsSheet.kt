@@ -294,7 +294,7 @@ fun DownloadsSheet(
                         DownloadItemCard(
                             item = item,
                             onClick = {
-                                DownloadHelper.openFile(context, item, onOpenInNovelReader)
+                                DownloadHelper.openFile(context, item)
                             },
                             onOpenInTts = if (item.isNovelOrText && onOpenInNovelReader != null) {
                                 {

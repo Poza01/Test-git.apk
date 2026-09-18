@@ -150,8 +150,7 @@ object DownloadHelper {
 
     fun openFile(
         context: Context,
-        item: DownloadItem,
-        onOpenInTts: ((text: String, title: String) -> Unit)? = null
+        item: DownloadItem
     ) {
         try {
             if (!item.file.exists()) {
@@ -160,34 +159,21 @@ object DownloadHelper {
                 return
             }
 
-            // If it's text/novel, we can read text and open directly or open with intent
-            if (item.isNovelOrText && onOpenInTts != null) {
-                try {
-                    val text = item.file.readText()
-                    if (text.isNotBlank()) {
-                        val title = item.fileName.substringBeforeLast(".")
-                        onOpenInTts(text, title)
-                        return
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Could not read text for TTS: ${e.message}")
-                }
-            }
-
-            // Open with system chooser via FileProvider
+            // Standard Open with Android system app / chooser via FileProvider (Google Chrome style)
             val contentUri: Uri = FileProvider.getUriForFile(
                 context,
                 "${context.packageName}.fileprovider",
                 item.file
             )
 
+            val mime = item.mimeType.ifBlank { "*/*" }
             val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(contentUri, item.mimeType)
+                setDataAndType(contentUri, mime)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
 
-            context.startActivity(Intent.createChooser(intent, "เปิดไฟล์ด้วย...").apply {
+            context.startActivity(Intent.createChooser(intent, "เปิดไฟล์: ${item.fileName}").apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             })
         } catch (e: Exception) {
