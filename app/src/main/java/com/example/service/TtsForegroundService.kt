@@ -113,6 +113,27 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
+    fun getTtsVoices(): List<VoiceInfo> {
+        val allVoices = try {
+            tts?.voices?.toList() ?: emptyList()
+        } catch (e: Exception) {
+            emptyList()
+        }
+        val thaiLocale = Locale("th", "TH")
+        val thaiVoices = allVoices.filter {
+            it.locale.language.equals("th", ignoreCase = true) || it.locale == thaiLocale
+        }
+        val targetList = if (thaiVoices.isNotEmpty()) thaiVoices else allVoices
+        return targetList.map { voice ->
+            VoiceInfo(
+                name = voice.name,
+                locale = voice.locale.toLanguageTag(),
+                isNetworkConnectionRequired = voice.isNetworkConnectionRequired,
+                quality = if (voice.quality >= Voice.QUALITY_HIGH) "High Quality" else "Normal"
+            )
+        }
+    }
+
     private fun initTtsEngine() {
         tts = TextToSpeech(applicationContext, this)
     }
@@ -128,21 +149,43 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
             }
 
             val defaultEngine = tts?.defaultEngine ?: "Android TTS"
+            val voiceInfoList = getTtsVoices()
+
+            val savedVoice = prefs.selectedVoice
+            val allVoices = try { tts?.voices?.toList() ?: emptyList() } catch (e: Exception) { emptyList() }
+            val targetVoice = if (!savedVoice.isNullOrBlank()) {
+                allVoices.find { it.name == savedVoice }
+            } else {
+                allVoices.find { it.locale.language.equals("th", ignoreCase = true) } ?: allVoices.firstOrNull()
+            }
+
+            if (targetVoice != null) {
+                try {
+                    tts?.voice = targetVoice
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to set voice $targetVoice: ${e.message}")
+                }
+            }
+
+            val initialRate = prefs.defaultRate.coerceIn(0.5f, 2.5f)
+            val initialPitch = prefs.defaultPitch.coerceIn(0.5f, 1.8f)
+            tts?.setSpeechRate(initialRate)
+            tts?.setPitch(initialPitch)
 
             _playbackState.update { current ->
                 current.copy(
                     isInitialized = true,
                     engineName = defaultEngine,
-                    availableVoices = emptyList(),
-                    selectedVoiceName = "ค่าเริ่มต้นของระบบ ROM",
-                    speechRate = 1.0f,
-                    speechPitch = 1.0f
+                    availableVoices = voiceInfoList,
+                    selectedVoiceName = targetVoice?.name ?: "ค่าเริ่มต้นของระบบ ROM",
+                    speechRate = initialRate,
+                    speechPitch = initialPitch
                 )
             }
 
             setupUtteranceListener()
             updateForegroundNotification()
-            Log.d(TAG, "TextToSpeech initialized with raw native engine=$defaultEngine")
+            Log.d(TAG, "TextToSpeech initialized with engine=$defaultEngine, voices=${voiceInfoList.size}")
 
             // Execute any pending speech requested before initialization was complete
             val pending = pendingSpeechAction
@@ -349,6 +392,17 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
         startAsForegroundService()
         updateForegroundNotification()
 
+        val currentRate = _playbackState.value.speechRate.takeIf { it in 0.5f..2.5f } ?: prefs.defaultRate
+        val currentPitch = _playbackState.value.speechPitch.takeIf { it in 0.5f..1.8f } ?: prefs.defaultPitch
+        tts?.setSpeechRate(currentRate)
+        tts?.setPitch(currentPitch)
+
+        if (cleanText.any { it in '\u0E00'..'\u0E7F' }) {
+            try {
+                tts?.language = Locale("th", "TH")
+            } catch (e: Exception) {}
+        }
+
         val utteranceId = "web_utt_$webUtteranceId"
         tts?.speak(cleanText, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
     }
@@ -481,7 +535,16 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
             }
             AudioSourceType.WEB_SPEECH_API -> {
                 // Device TTS (Web Speech API)
+                val rate = _playbackState.value.speechRate.takeIf { it in 0.5f..2.5f } ?: prefs.defaultRate
+                val pitch = _playbackState.value.speechPitch.takeIf { it in 0.5f..1.8f } ?: prefs.defaultPitch
+                tts?.setSpeechRate(rate)
+                tts?.setPitch(pitch)
+                _playbackState.value.selectedVoiceName?.let { vName -> setVoice(vName) }
+
                 if (state.currentText.isNotBlank() && state.currentText != "กำลังเล่นเสียง...") {
+                    if (state.currentText.any { it in '\u0E00'..'\u0E7F' }) {
+                        try { tts?.language = Locale("th", "TH") } catch (e: Exception) {}
+                    }
                     val uttId = currentWebUtteranceId ?: "0"
                     val utteranceId = "web_utt_$uttId"
                     tts?.speak(state.currentText, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
@@ -496,6 +559,9 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
                             isPlaying = true,
                             isPaused = false
                         )
+                    }
+                    if (lastItem.text.any { it in '\u0E00'..'\u0E7F' }) {
+                        try { tts?.language = Locale("th", "TH") } catch (e: Exception) {}
                     }
                     tts?.speak(lastItem.text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
                 }
@@ -515,6 +581,10 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
     }
 
     fun stopFromWeb() {
+        if (isUserPaused || _playbackState.value.isPaused) {
+            Log.d(TAG, "Ignoring stopFromWeb because playback is paused from notification")
+            return
+        }
         isUserPaused = false
         webIdleJob?.cancel()
         tts?.stop()
@@ -637,12 +707,19 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
 
     fun setVoice(voiceName: String) {
         try {
-            val targetVoice = tts?.voices?.find { it.name == voiceName }
+            val allVoices = tts?.voices
+            val targetVoice = allVoices?.find { it.name.equals(voiceName, ignoreCase = true) }
+                ?: allVoices?.find { it.name.contains(voiceName, ignoreCase = true) }
+                ?: allVoices?.find { voiceName.contains(it.name, ignoreCase = true) }
+                ?: (if (voiceName.contains("thai", ignoreCase = true) || voiceName.contains("th-", ignoreCase = true)) {
+                    allVoices?.find { it.locale.language.equals("th", ignoreCase = true) }
+                } else null)
+
             if (targetVoice != null) {
                 tts?.voice = targetVoice
-                prefs.selectedVoice = voiceName
-                _playbackState.update { it.copy(selectedVoiceName = voiceName) }
-                Log.d(TAG, "Voice changed and saved: $voiceName")
+                prefs.selectedVoice = targetVoice.name
+                _playbackState.update { it.copy(selectedVoiceName = targetVoice.name) }
+                Log.d(TAG, "Voice changed and saved: ${targetVoice.name}")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error changing voice", e)

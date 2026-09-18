@@ -348,7 +348,10 @@ class NovelTtsBridge(
     @JavascriptInterface
     fun getAvailableVoicesJson(): String {
         val service = getService() ?: TtsForegroundService.instance
-        val voices = service?.playbackState?.value?.availableVoices ?: emptyList()
+        var voices = service?.playbackState?.value?.availableVoices ?: emptyList()
+        if (voices.isEmpty()) {
+            voices = service?.getTtsVoices() ?: emptyList()
+        }
         val jsonArray = JSONArray()
         if (voices.isNotEmpty()) {
             for (v in voices) {
@@ -951,10 +954,10 @@ class NovelTtsBridge(
                         window.__android_active_utterance_id = item.id;
                         window.__android_tts_utterances[item.id] = item.utterance;
 
-                        if (item.utterance.rate && item.utterance.rate !== 1.0 && window.AndroidTtsBridge && window.AndroidTtsBridge.setRate) {
+                        if (item.utterance.rate && window.AndroidTtsBridge && window.AndroidTtsBridge.setRate) {
                             window.AndroidTtsBridge.setRate(item.utterance.rate);
                         }
-                        if (item.utterance.pitch && item.utterance.pitch !== 1.0 && window.AndroidTtsBridge && window.AndroidTtsBridge.setPitch) {
+                        if (item.utterance.pitch && window.AndroidTtsBridge && window.AndroidTtsBridge.setPitch) {
                             window.AndroidTtsBridge.setPitch(item.utterance.pitch);
                         }
                         if (item.utterance.voice && item.utterance.voice.name && window.AndroidTtsBridge && window.AndroidTtsBridge.setVoice) {
@@ -1017,6 +1020,9 @@ class NovelTtsBridge(
                         },
                         cancel: function() {
                             try {
+                                if (synth.paused) {
+                                    return;
+                                }
                                 window.__android_speech_queue.length = 0;
                                 isProcessingQueue = false;
                                 window.__android_tts_utterances = {};
@@ -1287,51 +1293,62 @@ class NovelTtsBridge(
                     // 6. Unified Notification Control Actions for all engines (Device, Google, Microsoft)
                     window.__android_tts_resume = function() {
                         try {
-                            let didResumeSomething = false;
-
                             // 1. If web has mediaSession handler for play
                             if (window.__mediaSessionHandlers && typeof window.__mediaSessionHandlers['play'] === 'function') {
-                                try { window.__mediaSessionHandlers['play'](); didResumeSomething = true; } catch(e){}
+                                try { window.__mediaSessionHandlers['play'](); } catch(e){}
                             }
                             // 2. Resume HTML5 Audio elements
                             if (window.__active_html5_audio && window.__active_html5_audio.paused) {
                                 window.__active_html5_audio.play().catch(() => {});
-                                didResumeSomething = true;
                             }
                             document.querySelectorAll('audio').forEach(a => {
                                 if (a.paused && a.src) {
                                     a.play().catch(() => {});
-                                    didResumeSomething = true;
                                 }
                             });
 
-                            // 3. Resume SpeechSynthesis state ONLY IF not in online TTS mode
-                            if (!window.__is_online_tts_active) {
-                                if (window.speechSynthesis) {
-                                    window.speechSynthesis.paused = false;
-                                    window.speechSynthesis.speaking = true;
-                                }
-                                if (window.__android_active_utterance_id) {
-                                    const utt = (window.__android_tts_utterances || {})[window.__android_active_utterance_id];
-                                    if (utt) {
-                                        dispatchUtteranceEvent(utt, 'resume');
-                                        didResumeSomething = true;
-                                    }
+                            // 3. Resume SpeechSynthesis state
+                            if (window.speechSynthesis) {
+                                window.speechSynthesis.paused = false;
+                                window.speechSynthesis.speaking = true;
+                            }
+                            if (window.__android_active_utterance_id) {
+                                const utt = (window.__android_tts_utterances || {})[window.__android_active_utterance_id];
+                                if (utt) {
+                                    dispatchUtteranceEvent(utt, 'resume');
                                 }
                             }
 
-                            // 4. Click web reader Play/Resume button only if audio elements didn't already resume
-                            if (!didResumeSomething) {
-                                const playBtn = document.querySelector(
-                                    '.tts-play:not(.tts-pause):not(.pause):not(.active), ' +
-                                    '.btn-play:not(.btn-pause):not(.pause):not(.active), ' +
-                                    '[data-action="play"], #play-button:not(.paused), .reader-play:not(.active), ' +
-                                    '.audio-play:not(.paused), .play-btn:not(.active), .btn-read-play, ' +
-                                    '[aria-label*="Play" i], [title*="เล่น" i], [title*="Play" i], [aria-label*="เล่น" i], ' +
-                                    '.fa-play, [data-action="tts-play"], #btn-tts-play'
-                                );
-                                if (playBtn && !playBtn.classList.contains('fa-pause') && !playBtn.classList.contains('pause') && !playBtn.classList.contains('active')) {
-                                    simulateFullClick(playBtn);
+                            // 4. Always trigger the web reader Play button if in paused state!
+                            // This ensures the web reader controller (for Google/Edge TTS and Web Speech API) switches to active playing
+                            // so that it will continue reading line 2, 3, 4, ... continuously!
+                            const playBtn = document.querySelector(
+                                '.tts-play:not(.tts-pause):not(.pause):not(.active), ' +
+                                '.btn-play:not(.btn-pause):not(.pause):not(.active), ' +
+                                '[data-action="play"]:not(.active):not(.pause), ' +
+                                '#play-button:not(.paused):not(.active), ' +
+                                '.reader-play:not(.active):not(.pause), ' +
+                                '.audio-play:not(.paused):not(.active):not(.pause), ' +
+                                '.play-btn:not(.active):not(.pause), ' +
+                                '.btn-read-play:not(.active):not(.pause), ' +
+                                '[aria-label*="Play" i]:not(.active):not([aria-label*="Pause" i]), ' +
+                                '[title*="เล่น" i]:not(.active):not([title*="หยุด" i]), ' +
+                                '[title*="Play" i]:not(.active):not([title*="Pause" i]), ' +
+                                '[aria-label*="เล่น" i]:not(.active):not([aria-label*="หยุด" i]), ' +
+                                '.fa-play:not(.fa-pause), ' +
+                                '[data-action="tts-play"]:not(.active), ' +
+                                '#btn-tts-play:not(.active)'
+                            );
+                            if (playBtn && !playBtn.classList.contains('fa-pause') && !playBtn.classList.contains('pause') && !playBtn.classList.contains('active')) {
+                                simulateFullClick(playBtn);
+                            }
+
+                            // 5. Call custom reader resume/play hooks if available
+                            if (window.reader) {
+                                if (typeof window.reader.resume === 'function') {
+                                    try { window.reader.resume(); } catch(e){}
+                                } else if (typeof window.reader.play === 'function') {
+                                    try { window.reader.play(); } catch(e){}
                                 }
                             }
                             return true;
