@@ -315,17 +315,11 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
         val cleanText = text.trim()
         if (cleanText.isBlank()) return
 
-        // If online audio stream is currently active or is current mode (Google/Microsoft TTS),
-        // reject/ignore Web Speech API requests so device TTS never overlaps!
-        if (currentAudioSourceType == AudioSourceType.WEB_AUDIO_STREAM) {
-            Log.d(TAG, "Ignoring speakFromWeb because WEB_AUDIO_STREAM (Google/Microsoft TTS) is active")
-            return
-        }
-
         webIdleJob?.cancel()
         currentAudioSourceType = AudioSourceType.WEB_SPEECH_API
         currentWebUtteranceId = webUtteranceId
         isWebAudioPlaying = false
+        isUserPaused = false
 
         // Keep history for rewinding sentences seamlessly
         if (webSpeechHistory.isEmpty() || webSpeechHistory.lastOrNull()?.text != cleanText) {
@@ -353,6 +347,7 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
         }
 
         startAsForegroundService()
+        updateForegroundNotification()
 
         val utteranceId = "web_utt_$webUtteranceId"
         tts?.speak(cleanText, TextToSpeech.QUEUE_FLUSH, null, utteranceId)

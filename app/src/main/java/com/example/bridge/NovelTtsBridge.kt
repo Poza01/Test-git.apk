@@ -942,13 +942,6 @@ class NovelTtsBridge(
                             return;
                         }
 
-                        // Block native speech processing if Online TTS (Google / Microsoft TTS) is active!
-                        if (window.__is_online_tts_active || (window.__active_html5_audio && !window.__active_html5_audio.paused)) {
-                            console.log("[NovelTtsBridge] Suppressing Web Speech queue item because Online TTS stream is active");
-                            isProcessingQueue = false;
-                            return;
-                        }
-
                         const item = window.__android_speech_queue.shift();
                         isProcessingQueue = true;
                         if (window.speechSynthesis) {
@@ -988,11 +981,11 @@ class NovelTtsBridge(
                             try {
                                 if (!utterance) return;
 
-                                // Block native speech synthesis if Online TTS (Google / Microsoft TTS) is active!
-                                if (window.__is_online_tts_active || (window.__active_html5_audio && !window.__active_html5_audio.paused)) {
-                                    console.log("[NovelTtsBridge] Blocking speechSynthesis.speak because Online TTS stream is active");
-                                    return;
+                                // If any HTML5 audio stream (Google/Edge TTS) was playing, pause it so they don't overlap
+                                if (window.__active_html5_audio && !window.__active_html5_audio.paused) {
+                                    try { window.__active_html5_audio.pause(); } catch(e) {}
                                 }
+                                window.__is_online_tts_active = false;
 
                                 const text = (typeof utterance === 'string') ? utterance : (utterance.text || '');
                                 if (!text || text.trim().length === 0) {
@@ -1121,6 +1114,13 @@ class NovelTtsBridge(
                                 webAudioPauseDebounceTimer = null;
                             }
                             if (webAudioDebounceTimer) clearTimeout(webAudioDebounceTimer);
+
+                            // Cancel any web speech synthesis queue if HTML5 audio is playing to prevent duplicate audio
+                            if (window.speechSynthesis && window.speechSynthesis.speaking) {
+                                window.__android_speech_queue = [];
+                                isProcessingQueue = false;
+                            }
+
                             // Immediately inform Android service to update notification icon to || without delay
                             const engine = getAudioEngineName(audio);
                             const title = (document.querySelector('h1, .chapter-title, #chapter-title, .title') || {}).innerText || document.title || "อ่านนิยายเว็บ";
