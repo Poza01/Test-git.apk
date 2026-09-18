@@ -1095,10 +1095,16 @@ class NovelTtsBridge(
                     }
 
                     let webAudioDebounceTimer = null;
+                    let webAudioPauseDebounceTimer = null;
 
                     function notifyAudioPlaying(audio) {
                         try {
                             window.__active_html5_audio = audio;
+                            window.__is_online_tts_active = true;
+                            if (webAudioPauseDebounceTimer) {
+                                clearTimeout(webAudioPauseDebounceTimer);
+                                webAudioPauseDebounceTimer = null;
+                            }
                             if (webAudioDebounceTimer) clearTimeout(webAudioDebounceTimer);
                             webAudioDebounceTimer = setTimeout(function() {
                                 try {
@@ -1118,8 +1124,9 @@ class NovelTtsBridge(
         private const val INJECTION_PART_2 = """
                     function notifyAudioPaused(audio) {
                         try {
-                            if (window.speechSynthesis && window.speechSynthesis.speaking) return;
-                            setTimeout(function() {
+                            if (window.speechSynthesis && window.speechSynthesis.speaking && !window.__is_online_tts_active) return;
+                            if (webAudioPauseDebounceTimer) clearTimeout(webAudioPauseDebounceTimer);
+                            webAudioPauseDebounceTimer = setTimeout(function() {
                                 try {
                                     if (window.__active_html5_audio && !window.__active_html5_audio.paused) return;
                                     let anyPlaying = false;
@@ -1127,26 +1134,28 @@ class NovelTtsBridge(
                                         if (!a.paused) anyPlaying = true;
                                     });
                                     if (anyPlaying) return;
-                                    // Give 3.5s grace period between chunked audio clips
+                                    // Give 5.5s grace period between chunked audio clips so notification icon doesn't flicker
                                     setTimeout(function() {
                                         let stillPlaying = false;
                                         document.querySelectorAll('audio').forEach(function(a) {
                                             if (!a.paused) stillPlaying = true;
                                         });
                                         if (stillPlaying) return;
+                                        window.__is_online_tts_active = false;
                                         if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.onWebAudioPaused === 'function') {
                                             window.AndroidTtsBridge.onWebAudioPaused();
                                         }
-                                    }, 3500);
+                                    }, 5500);
                                 } catch(e) {}
-                            }, 500);
+                            }, 300);
                         } catch(e) {}
                     }
 
                     function notifyAudioEnded() {
                         try {
-                            if (window.speechSynthesis && window.speechSynthesis.speaking) return;
-                            setTimeout(function() {
+                            if (window.speechSynthesis && window.speechSynthesis.speaking && !window.__is_online_tts_active) return;
+                            if (webAudioPauseDebounceTimer) clearTimeout(webAudioPauseDebounceTimer);
+                            webAudioPauseDebounceTimer = setTimeout(function() {
                                 try {
                                     if (window.__active_html5_audio && !window.__active_html5_audio.paused) return;
                                     let anyPlaying = false;
@@ -1154,19 +1163,20 @@ class NovelTtsBridge(
                                         if (!a.paused) anyPlaying = true;
                                     });
                                     if (anyPlaying) return;
-                                    // Grace period of 4.5s for online TTS to load next chunk/sentence
+                                    // Grace period of 6s for online TTS to load next chunk/sentence
                                     setTimeout(function() {
                                         let stillPlaying = false;
                                         document.querySelectorAll('audio').forEach(function(a) {
                                             if (!a.paused) stillPlaying = true;
                                         });
                                         if (stillPlaying) return;
+                                        window.__is_online_tts_active = false;
                                         if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.onWebAudioEnded === 'function') {
                                             window.AndroidTtsBridge.onWebAudioEnded();
                                         }
-                                    }, 4500);
+                                    }, 6000);
                                 } catch(e) {}
-                            }, 500);
+                            }, 300);
                         } catch(e) {}
                     }
 
@@ -1264,16 +1274,19 @@ class NovelTtsBridge(
                                     didResumeSomething = true;
                                 }
                             });
-                            // 3. Resume SpeechSynthesis state
-                            if (window.speechSynthesis) {
-                                window.speechSynthesis.paused = false;
-                                window.speechSynthesis.speaking = true;
-                            }
-                            if (window.__android_active_utterance_id) {
-                                const utt = (window.__android_tts_utterances || {})[window.__android_active_utterance_id];
-                                if (utt) {
-                                    dispatchUtteranceEvent(utt, 'resume');
-                                    didResumeSomething = true;
+
+                            // 3. Resume SpeechSynthesis state ONLY IF not in online TTS mode
+                            if (!window.__is_online_tts_active) {
+                                if (window.speechSynthesis) {
+                                    window.speechSynthesis.paused = false;
+                                    window.speechSynthesis.speaking = true;
+                                }
+                                if (window.__android_active_utterance_id) {
+                                    const utt = (window.__android_tts_utterances || {})[window.__android_active_utterance_id];
+                                    if (utt) {
+                                        dispatchUtteranceEvent(utt, 'resume');
+                                        didResumeSomething = true;
+                                    }
                                 }
                             }
 
@@ -1298,6 +1311,10 @@ class NovelTtsBridge(
 
                     window.__android_tts_pause = function() {
                         try {
+                            if (webAudioPauseDebounceTimer) {
+                                clearTimeout(webAudioPauseDebounceTimer);
+                                webAudioPauseDebounceTimer = null;
+                            }
                             // 1. If web has mediaSession handler for pause
                             if (window.__mediaSessionHandlers && typeof window.__mediaSessionHandlers['pause'] === 'function') {
                                 try { window.__mediaSessionHandlers['pause'](); } catch(e){}

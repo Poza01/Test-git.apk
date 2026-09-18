@@ -311,6 +311,13 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
         val cleanText = text.trim()
         if (cleanText.isBlank()) return
 
+        // If online audio stream is currently active and playing (Google/Microsoft TTS),
+        // reject/ignore Web Speech API requests so device TTS never overlaps!
+        if (currentAudioSourceType == AudioSourceType.WEB_AUDIO_STREAM && isWebAudioPlaying) {
+            Log.d(TAG, "Ignoring speakFromWeb because WEB_AUDIO_STREAM (Google/Microsoft TTS) is actively playing")
+            return
+        }
+
         webIdleJob?.cancel()
         currentAudioSourceType = AudioSourceType.WEB_SPEECH_API
         currentWebUtteranceId = webUtteranceId
@@ -351,6 +358,7 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
         webIdleJob?.cancel()
         currentAudioSourceType = AudioSourceType.WEB_AUDIO_STREAM
         isWebAudioPlaying = true
+        isUserPaused = false
         if (tts?.isSpeaking == true) {
             tts?.stop()
         }
@@ -369,23 +377,29 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
 
     fun onWebAudioPaused() {
         webIdleJob?.cancel()
-        isWebAudioPlaying = false
-        _playbackState.update {
-            it.copy(
-                isPlaying = false,
-                isPaused = true
-            )
+        // Grace period before setting isPlaying = false to prevent button flickering between audio chunks
+        webIdleJob = serviceScope.launch {
+            kotlinx.coroutines.delay(5000L)
+            if (currentAudioSourceType == AudioSourceType.WEB_AUDIO_STREAM) {
+                isWebAudioPlaying = false
+                _playbackState.update {
+                    it.copy(
+                        isPlaying = false,
+                        isPaused = true
+                    )
+                }
+                updateForegroundNotification()
+            }
         }
-        updateForegroundNotification()
     }
 
     fun onWebAudioEnded() {
         webIdleJob?.cancel()
         webIdleJob = serviceScope.launch {
-            kotlinx.coroutines.delay(2000L)
-            if (isWebAudioPlaying) {
+            kotlinx.coroutines.delay(6000L)
+            if (currentAudioSourceType == AudioSourceType.WEB_AUDIO_STREAM) {
                 isWebAudioPlaying = false
-                _playbackState.update { it.copy(isPlaying = false) }
+                _playbackState.update { it.copy(isPlaying = false, isPaused = false) }
                 updateForegroundNotification()
             }
         }
@@ -422,6 +436,7 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
 
     fun pause() {
         isUserPaused = true
+        isWebAudioPlaying = false
         webIdleJob?.cancel()
         if (tts?.isSpeaking == true) {
             tts?.stop()
@@ -432,7 +447,7 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
     }
 
     fun togglePlayPause() {
-        val currentlyPlaying = _playbackState.value.isPlaying || (tts?.isSpeaking == true)
+        val currentlyPlaying = _playbackState.value.isPlaying || (tts?.isSpeaking == true) || isWebAudioPlaying
         if (currentlyPlaying) {
             pause()
         } else {
@@ -458,6 +473,10 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
             }
             AudioSourceType.WEB_AUDIO_STREAM -> {
                 // Online audio stream (Google / Microsoft TTS)
+                isWebAudioPlaying = true
+                if (tts?.isSpeaking == true) {
+                    tts?.stop()
+                }
                 // NEVER speak with native TTS! Only notify the web reader to resume audio playback
                 com.example.bridge.NovelTtsBridge.notifyPlayResumeFromService()
             }
