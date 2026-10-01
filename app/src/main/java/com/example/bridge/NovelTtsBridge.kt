@@ -117,6 +117,7 @@ class NovelTtsBridge(
             getWebView()?.evaluateJavascript("""
                 (function() {
                     try {
+                        window.__user_explicit_pause = true;
                         sessionStorage.removeItem('__novel_auto_play_next');
                         if (window.__android_tts_pause && typeof window.__android_tts_pause === 'function') {
                             window.__android_tts_pause();
@@ -127,6 +128,15 @@ class NovelTtsBridge(
                     } catch(e){}
                 })();
             """.trimIndent(), null)
+        }
+    }
+
+    fun onKeepWebAudioAlive() {
+        mainHandler.post {
+            val wv = getWebView() ?: return@post
+            try {
+                wv.resumeTimers()
+            } catch (e: Exception) {}
         }
     }
 
@@ -481,6 +491,10 @@ class NovelTtsBridge(
 
         fun notifyStopFromService() {
             activeBridge?.onStopFromNotification()
+        }
+
+        fun keepWebAudioAliveFromService() {
+            activeBridge?.onKeepWebAudioAlive()
         }
 
         /**

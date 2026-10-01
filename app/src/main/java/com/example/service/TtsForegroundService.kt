@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.BitmapFactory
+import android.net.wifi.WifiManager
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
@@ -43,6 +44,8 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
 
     private var tts: TextToSpeech? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
+    private var webKeepAliveJob: kotlinx.coroutines.Job? = null
     private val notificationManager by lazy { getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager }
 
     private val _playbackState = MutableStateFlow(TtsPlaybackState())
@@ -88,17 +91,38 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
 
     private fun acquireWakeLock() {
         try {
-            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-            wakeLock = powerManager.newWakeLock(
-                PowerManager.PARTIAL_WAKE_LOCK,
-                "NovelAI::TtsForegroundWakeLock"
-            ).apply {
-                setReferenceCounted(false)
-                acquire(10 * 60 * 60 * 1000L) // 10 hours safety window
+            if (wakeLock?.isHeld != true) {
+                val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+                wakeLock = powerManager.newWakeLock(
+                    PowerManager.PARTIAL_WAKE_LOCK,
+                    "NovelAI::TtsForegroundWakeLock"
+                ).apply {
+                    setReferenceCounted(false)
+                    acquire(10 * 60 * 60 * 1000L) // 10 hours safety window
+                }
+                Log.d(TAG, "WakeLock acquired for background reading")
             }
-            Log.d(TAG, "WakeLock acquired for background reading")
         } catch (e: Exception) {
             Log.e(TAG, "Error acquiring WakeLock", e)
+        }
+
+        try {
+            if (wifiLock?.isHeld != true) {
+                val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+                val lockMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+                } else {
+                    @Suppress("DEPRECATION")
+                    WifiManager.WIFI_MODE_FULL_HIGH_PERF
+                }
+                wifiLock = wifiManager?.createWifiLock(lockMode, "NovelAI::TtsWifiLock")?.apply {
+                    setReferenceCounted(false)
+                    acquire()
+                }
+                Log.d(TAG, "WifiLock acquired for background online TTS streaming")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error acquiring WifiLock", e)
         }
     }
 
@@ -111,6 +135,33 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
         } catch (e: Exception) {
             Log.e(TAG, "Error releasing WakeLock", e)
         }
+        try {
+            if (wifiLock?.isHeld == true) {
+                wifiLock?.release()
+                Log.d(TAG, "WifiLock released")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error releasing WifiLock", e)
+        }
+    }
+
+    private fun startWebStreamKeepAlive() {
+        acquireWakeLock()
+
+        // Keep WebView JS timers awake in background without stealing AudioFocus from WebView
+        if (webKeepAliveJob?.isActive != true) {
+            webKeepAliveJob = serviceScope.launch {
+                while (isWebAudioPlaying && !isUserPaused) {
+                    com.example.bridge.NovelTtsBridge.keepWebAudioAliveFromService()
+                    kotlinx.coroutines.delay(1500L)
+                }
+            }
+        }
+    }
+
+    private fun stopWebStreamKeepAlive() {
+        webKeepAliveJob?.cancel()
+        webKeepAliveJob = null
     }
 
     fun getTtsVoices(): List<VoiceInfo> {
@@ -425,16 +476,18 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
             )
         }
         startAsForegroundService()
+        startWebStreamKeepAlive()
         updateForegroundNotification()
     }
 
     fun onWebAudioPaused() {
         webIdleJob?.cancel()
-        // Grace period before setting isPlaying = false to prevent button flickering between audio chunks
+        // Grace period before setting isPlaying = false to prevent button flickering or cutting off between audio chunks in background
         webIdleJob = serviceScope.launch {
-            kotlinx.coroutines.delay(5000L)
+            kotlinx.coroutines.delay(12000L)
             if (currentAudioSourceType == AudioSourceType.WEB_AUDIO_STREAM) {
                 isWebAudioPlaying = false
+                stopWebStreamKeepAlive()
                 _playbackState.update {
                     it.copy(
                         isPlaying = false,
@@ -449,9 +502,10 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
     fun onWebAudioEnded() {
         webIdleJob?.cancel()
         webIdleJob = serviceScope.launch {
-            kotlinx.coroutines.delay(6000L)
+            kotlinx.coroutines.delay(12000L)
             if (currentAudioSourceType == AudioSourceType.WEB_AUDIO_STREAM) {
                 isWebAudioPlaying = false
+                stopWebStreamKeepAlive()
                 _playbackState.update { it.copy(isPlaying = false, isPaused = false) }
                 updateForegroundNotification()
             }
@@ -491,6 +545,7 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
         isUserPaused = true
         isWebAudioPlaying = false
         webIdleJob?.cancel()
+        stopWebStreamKeepAlive()
         if (tts?.isSpeaking == true) {
             tts?.stop()
         }
@@ -530,6 +585,7 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
                 if (tts?.isSpeaking == true) {
                     tts?.stop()
                 }
+                startWebStreamKeepAlive()
                 // NEVER speak with native TTS! Only notify the web reader to resume audio playback
                 com.example.bridge.NovelTtsBridge.notifyPlayResumeFromService()
             }
@@ -572,7 +628,9 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
 
     fun pauseFromWeb() {
         isUserPaused = true
+        isWebAudioPlaying = false
         webIdleJob?.cancel()
+        stopWebStreamKeepAlive()
         if (tts?.isSpeaking == true) {
             tts?.stop()
         }
@@ -586,7 +644,9 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
             return
         }
         isUserPaused = false
+        isWebAudioPlaying = false
         webIdleJob?.cancel()
+        stopWebStreamKeepAlive()
         tts?.stop()
         _playbackState.update {
             it.copy(
@@ -600,7 +660,9 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
 
     fun stop() {
         isUserPaused = false
+        isWebAudioPlaying = false
         webIdleJob?.cancel()
+        stopWebStreamKeepAlive()
         tts?.stop()
         _playbackState.update {
             it.copy(
@@ -886,6 +948,7 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
         if (instance == this) {
             instance = null
         }
+        stopWebStreamKeepAlive()
         tts?.stop()
         tts?.shutdown()
         tts = null

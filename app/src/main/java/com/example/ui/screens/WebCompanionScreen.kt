@@ -856,7 +856,26 @@ fun WebCompanionScreen(
         ) {
             AndroidView(
                 factory = { ctx ->
-                    WebView(ctx).apply {
+                    object : WebView(ctx) {
+                        override fun onWindowVisibilityChanged(visibility: Int) {
+                            // Always report VISIBLE to Chromium so online TTS audio streams,
+                            // chunk downloads (fetch/XHR), and JS timers are NEVER suspended when screen is off or minimized
+                            super.onWindowVisibilityChanged(android.view.View.VISIBLE)
+                        }
+
+                        override fun onVisibilityChanged(changedView: android.view.View, visibility: Int) {
+                            super.onVisibilityChanged(changedView, android.view.View.VISIBLE)
+                        }
+
+                        override fun pauseTimers() {
+                            // Prevent Android/system from pausing JS timers when app enters background
+                            super.resumeTimers()
+                        }
+
+                        override fun onPause() {
+                            // Keep HTML5 Audio and network streams active in background
+                        }
+                    }.apply {
                         layoutParams = ViewGroup.LayoutParams(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT
