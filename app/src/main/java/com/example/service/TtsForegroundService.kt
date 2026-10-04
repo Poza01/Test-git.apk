@@ -485,17 +485,24 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
     fun onWebAudioPaused() {
         webIdleJob?.cancel()
         if (currentAudioSourceType != AudioSourceType.WEB_AUDIO_STREAM) {
+            // NEVER pause or kill on-device Web Speech API when HTML5 audio triggers pause events
             return
         }
-        isWebAudioPlaying = false
-        stopWebStreamKeepAlive()
-        _playbackState.update {
-            it.copy(
-                isPlaying = false,
-                isPaused = true
-            )
+        // Grace period before setting isPlaying = false to prevent button flickering or cutting off between audio chunks in background
+        webIdleJob = serviceScope.launch {
+            kotlinx.coroutines.delay(12000L)
+            if (currentAudioSourceType == AudioSourceType.WEB_AUDIO_STREAM) {
+                isWebAudioPlaying = false
+                stopWebStreamKeepAlive()
+                _playbackState.update {
+                    it.copy(
+                        isPlaying = false,
+                        isPaused = true
+                    )
+                }
+                updateForegroundNotification()
+            }
         }
-        updateForegroundNotification()
     }
 
     fun onWebAudioEnded() {
@@ -503,15 +510,15 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
         if (currentAudioSourceType != AudioSourceType.WEB_AUDIO_STREAM) {
             return
         }
-        isWebAudioPlaying = false
-        stopWebStreamKeepAlive()
-        _playbackState.update {
-            it.copy(
-                isPlaying = false,
-                isPaused = false
-            )
+        webIdleJob = serviceScope.launch {
+            kotlinx.coroutines.delay(12000L)
+            if (currentAudioSourceType == AudioSourceType.WEB_AUDIO_STREAM) {
+                isWebAudioPlaying = false
+                stopWebStreamKeepAlive()
+                _playbackState.update { it.copy(isPlaying = false, isPaused = false) }
+                updateForegroundNotification()
+            }
         }
-        updateForegroundNotification()
     }
 
     private fun speakParagraphInternal(index: Int) {
@@ -674,6 +681,7 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
     }
 
     fun pauseFromWeb() {
+        if (currentAudioSourceType == AudioSourceType.WEB_AUDIO_STREAM) return
         isUserPaused = true
         isWebAudioPlaying = false
         webIdleJob?.cancel()
@@ -883,7 +891,7 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
 
         // Play/Pause toggle intent
         val playPauseIntent = Intent(this, TtsForegroundService::class.java).apply {
-            action = ACTION_TOGGLE_PLAY_PAUSE
+            action = if (state.isPlaying) ACTION_PAUSE else ACTION_PLAY
         }
         val pendingPlayPause = PendingIntent.getService(this, 2, playPauseIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 

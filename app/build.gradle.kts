@@ -17,7 +17,7 @@ android {
     applicationId = "com.aistudio.noveltts.kxwvyq"
     minSdk = 24
     targetSdk = 36
-    versionCode = 19
+    versionCode = 20
     versionName = "2.8"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
