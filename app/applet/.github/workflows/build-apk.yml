@@ -62,37 +62,26 @@ jobs:
         run: |
           VERSION_NAME=$(grep "versionName" app/build.gradle.kts | head -n 1 | sed -E 's/.*versionName[ =]+"(.*)".*/\1/')
           VERSION_CODE=$(grep "versionCode" app/build.gradle.kts | head -n 1 | sed -E 's/.*versionCode[ =]+([0-9]+).*/\1/')
-          [ -z "$VERSION_NAME" ] && VERSION_NAME="2.3"
-          [ -z "$VERSION_CODE" ] && VERSION_CODE="14"
+          [ -z "$VERSION_NAME" ] && VERSION_NAME="2.4"
+          [ -z "$VERSION_CODE" ] && VERSION_CODE="15"
           
-          RELEASE_TAG="v${VERSION_NAME}"
+          # Unique tag per version and build code so older releases are ALWAYS PRESERVED
+          RELEASE_TAG="v${VERSION_NAME}-b${VERSION_CODE}"
           RELEASE_TITLE="NovelAI TTS v${VERSION_NAME} (Build ${VERSION_CODE})"
           BUILD_TIME=$(date -u '+%Y-%m-%d %H:%M UTC')
           
           APK_FILE=$(ls app/build/outputs/apk/debug/*.apk | head -n 1)
           if [ -n "$APK_FILE" ] && [ -f "$APK_FILE" ]; then
-            echo "Publishing $APK_FILE for release $RELEASE_TITLE..."
+            echo "Publishing new release $RELEASE_TITLE with tag $RELEASE_TAG..."
             
-            # Delete old 'latest' release to reset release creation timestamp (so it does not show '2 weeks ago')
-            gh release delete "latest" -y 2>/dev/null || true
-            git push --delete origin "latest" 2>/dev/null || true
-            
-            # Delete version tag if it exists so we recreate it fresh
-            gh release delete "$RELEASE_TAG" -y 2>/dev/null || true
-            git push --delete origin "$RELEASE_TAG" 2>/dev/null || true
-            
-            # Create fresh release marked with --latest
+            # Create a brand new release for this version (keeps all past releases intact)
             gh release create "$RELEASE_TAG" "$APK_FILE" \
               --title "$RELEASE_TITLE" \
-              --notes "ดาวน์โหลดไฟล์ APK เวอร์ชันล่าสุด ${VERSION_NAME} (Build ${VERSION_CODE}) คอมไพล์สำเร็จจาก Commit: ${{ github.sha }} เมื่อ ${BUILD_TIME}" \
-              --latest
+              --notes "ดาวน์โหลดไฟล์ APK เวอร์ชัน ${VERSION_NAME} (Build ${VERSION_CODE}) คอมไพล์สำเร็จจาก Commit: ${{ github.sha }} เมื่อ ${BUILD_TIME}" \
+              --latest || \
+            gh release upload "$RELEASE_TAG" "$APK_FILE" --clobber
               
-            # Also recreate 'latest' release tag pointing to the fresh release
-            gh release create "latest" "$APK_FILE" \
-              --title "NovelAI TTS (Latest APK - v${VERSION_NAME})" \
-              --notes "ดาวน์โหลดไฟล์ APK เวอร์ชันล่าสุด (อัปเดตอัตโนมัติจาก Commit: ${{ github.sha }}) เมื่อ ${BUILD_TIME}" 2>/dev/null || true
-              
-            echo "Successfully published fresh release: $RELEASE_TITLE"
+            echo "Successfully created and published new release: $RELEASE_TITLE"
           else
             echo "No APK file found to release."
           fi

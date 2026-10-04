@@ -1078,9 +1078,6 @@ class NovelTtsBridge(
                                 synth.speaking = false;
                                 synth.paused = false;
                                 synth.pending = false;
-                                if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.stopFromWeb === 'function') {
-                                    window.AndroidTtsBridge.stopFromWeb();
-                                }
                             } catch(e) {}
                         },
                         pause: function() {
