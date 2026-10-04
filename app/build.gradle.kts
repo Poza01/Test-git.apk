@@ -20,8 +20,6 @@ android {
     versionCode = 19
     versionName = "2.8"
 
-    buildConfigField("String", "GITHUB_REPOSITORY", "\"${System.getenv("GITHUB_REPOSITORY") ?: ""}\"")
-
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 

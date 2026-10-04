@@ -141,6 +141,16 @@ fun WebCompanionScreen(
 
     LaunchedEffect(Unit) {
         DownloadHelper.init(context)
+        try {
+            val serviceIntent = Intent(context, TtsForegroundService::class.java)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                context.startForegroundService(serviceIntent)
+            } else {
+                context.startService(serviceIntent)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }

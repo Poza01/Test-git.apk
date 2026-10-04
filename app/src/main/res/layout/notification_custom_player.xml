@@ -3,62 +3,99 @@
     android:id="@+id/notif_root"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:minHeight="48dp"
+    android:minHeight="56dp"
     android:orientation="horizontal"
     android:background="@drawable/bg_notif_card"
     android:paddingLeft="10dp"
     android:paddingRight="10dp"
     android:paddingTop="6dp"
     android:paddingBottom="6dp"
-    android:gravity="center_vertical|start">
+    android:gravity="center_vertical">
 
-    <!-- Playback Control Buttons (Left-Aligned, Compact & Seamless) -->
-    <!-- Previous Button -->
-    <ImageView
-        android:id="@+id/btn_notif_prev"
-        android:layout_width="38dp"
-        android:layout_height="38dp"
-        android:background="@drawable/bg_notif_btn_glass"
-        android:src="@drawable/ic_notif_prev"
-        android:padding="8dp"
-        android:scaleType="centerInside"
-        android:contentDescription="ย้อนกลับ" />
+    <!-- Title and Content Info -->
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:paddingRight="6dp">
 
-    <!-- Play / Pause Main Button -->
-    <ImageView
-        android:id="@+id/btn_notif_play_pause"
-        android:layout_width="40dp"
-        android:layout_height="40dp"
-        android:layout_marginLeft="10dp"
-        android:background="@drawable/bg_notif_play_amber"
-        android:src="@drawable/ic_notif_pause_dark"
-        android:padding="9dp"
-        android:scaleType="centerInside"
-        android:contentDescription="เล่นหรือพัก" />
+        <TextView
+            android:id="@+id/txt_notif_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="อ่านนิยายเว็บ"
+            android:textColor="#FFFFFF"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:singleLine="true"
+            android:ellipsize="end" />
 
-    <!-- Next Button -->
-    <ImageView
-        android:id="@+id/btn_notif_next"
-        android:layout_width="38dp"
-        android:layout_height="38dp"
-        android:layout_marginLeft="10dp"
-        android:background="@drawable/bg_notif_btn_glass"
-        android:src="@drawable/ic_notif_next"
-        android:padding="8dp"
-        android:scaleType="centerInside"
-        android:contentDescription="ถัดไป" />
+        <TextView
+            android:id="@+id/txt_notif_subtitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="พร้อมอ่านเสียงภาษาไทยเบื้องหลัง"
+            android:textColor="#B0BEC5"
+            android:textSize="11sp"
+            android:singleLine="true"
+            android:ellipsize="end" />
+    </LinearLayout>
 
-    <!-- Stop / Close Button -->
-    <ImageView
-        android:id="@+id/btn_notif_stop"
-        android:layout_width="38dp"
-        android:layout_height="38dp"
-        android:layout_marginLeft="10dp"
-        android:background="@drawable/bg_notif_btn_glass"
-        android:src="@drawable/ic_notif_stop"
-        android:padding="9dp"
-        android:scaleType="centerInside"
-        android:contentDescription="หยุด" />
+    <!-- Playback Control Buttons -->
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <!-- Previous Button -->
+        <ImageView
+            android:id="@+id/btn_notif_prev"
+            android:layout_width="34dp"
+            android:layout_height="34dp"
+            android:background="@drawable/bg_notif_btn_glass"
+            android:src="@drawable/ic_notif_prev"
+            android:padding="7dp"
+            android:scaleType="centerInside"
+            android:contentDescription="ย้อนกลับ" />
+
+        <!-- Play / Pause Main Button -->
+        <ImageView
+            android:id="@+id/btn_notif_play_pause"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:layout_marginLeft="6dp"
+            android:background="@drawable/bg_notif_play_amber"
+            android:src="@drawable/ic_notif_pause_dark"
+            android:padding="7dp"
+            android:scaleType="centerInside"
+            android:contentDescription="เล่นหรือพัก" />
+
+        <!-- Next Button -->
+        <ImageView
+            android:id="@+id/btn_notif_next"
+            android:layout_width="34dp"
+            android:layout_height="34dp"
+            android:layout_marginLeft="6dp"
+            android:background="@drawable/bg_notif_btn_glass"
+            android:src="@drawable/ic_notif_next"
+            android:padding="7dp"
+            android:scaleType="centerInside"
+            android:contentDescription="ถัดไป" />
+
+        <!-- Stop / Close Button -->
+        <ImageView
+            android:id="@+id/btn_notif_stop"
+            android:layout_width="34dp"
+            android:layout_height="34dp"
+            android:layout_marginLeft="6dp"
+            android:background="@drawable/bg_notif_btn_glass"
+            android:src="@drawable/ic_notif_stop"
+            android:padding="7dp"
+            android:scaleType="centerInside"
+            android:contentDescription="หยุด" />
+    </LinearLayout>
 
 </LinearLayout>
-
