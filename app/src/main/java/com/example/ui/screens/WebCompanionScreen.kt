@@ -10,6 +10,7 @@ import android.os.Environment
 import android.view.ViewGroup
 import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
+import android.webkit.PermissionRequest
 import android.webkit.URLUtil
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -1147,6 +1148,14 @@ fun WebCompanionScreen(
                         }
 
                         webChromeClient = object : WebChromeClient() {
+                            override fun onPermissionRequest(request: PermissionRequest?) {
+                                try {
+                                    request?.grant(request.resources)
+                                } catch (e: Exception) {
+                                    super.onPermissionRequest(request)
+                                }
+                            }
+
                             override fun onProgressChanged(view: WebView?, newProgress: Int) {
                                 pageProgress = newProgress / 100f
                                 if (newProgress >= 100) isLoading = false

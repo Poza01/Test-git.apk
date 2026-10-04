@@ -6,9 +6,11 @@ import android.os.Build
 import android.os.Environment
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.MediaStore
 import android.util.Base64
 import android.util.Log
+import android.view.MotionEvent
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.widget.Toast
@@ -83,7 +85,27 @@ class NovelTtsBridge(
         }
     }
 
+    fun simulateNativeTouchOnWebView() {
+        mainHandler.post {
+            val wv = getWebView() ?: return@post
+            try {
+                val now = SystemClock.uptimeMillis()
+                val x = (wv.width.takeIf { it > 0 } ?: 400) / 2f
+                val y = (wv.height.takeIf { it > 0 } ?: 600) / 2f
+                val down = MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, x, y, 0)
+                val up = MotionEvent.obtain(now, now + 16, MotionEvent.ACTION_UP, x, y, 0)
+                wv.dispatchTouchEvent(down)
+                wv.dispatchTouchEvent(up)
+                down.recycle()
+                up.recycle()
+            } catch (e: Exception) {
+                // Safe ignore
+            }
+        }
+    }
+
     fun onResumeFromNotification() {
+        simulateNativeTouchOnWebView()
         mainHandler.post {
             getWebView()?.evaluateJavascript("""
                 (function() {
@@ -1093,16 +1115,60 @@ class NovelTtsBridge(
                                 } else if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.resume === 'function') {
                                     window.AndroidTtsBridge.resume();
                                 }
+
+                                // Fallback double-click on active line if reader uses paragraph selection
+                                setTimeout(function() {
+                                    try {
+                                        const activePara = document.querySelector(
+                                            '.reading, .tts-reading, .active-sentence, .highlight-reading, .highlight, ' +
+                                            '[data-reading="true"], .current-read, .reading-active, .active-para, .current-sentence'
+                                        );
+                                        if (activePara) {
+                                            const dblEvt = new MouseEvent('dblclick', { bubbles: true, cancelable: true, view: window });
+                                            activePara.dispatchEvent(dblEvt);
+                                        }
+                                    } catch(e){}
+                                }, 60);
                             } catch(e) {}
                         }
                     };
 
-                    // Overwrite window.speechSynthesis
-                    Object.defineProperty(window, 'speechSynthesis', {
-                        value: synth,
-                        writable: true,
-                        configurable: true
-                    });
+                    // Overwrite window.speechSynthesis and hook prototype
+                    try {
+                        Object.defineProperty(window, 'speechSynthesis', {
+                            value: synth,
+                            writable: true,
+                            configurable: true
+                        });
+                    } catch(e) {
+                        try { window.speechSynthesis = synth; } catch(err){}
+                    }
+
+                    try {
+                        if (window.SpeechSynthesis && window.SpeechSynthesis.prototype) {
+                            window.SpeechSynthesis.prototype.speak = function(u) { return synth.speak(u); };
+                            window.SpeechSynthesis.prototype.pause = function() { return synth.pause(); };
+                            window.SpeechSynthesis.prototype.resume = function() { return synth.resume(); };
+                            window.SpeechSynthesis.prototype.cancel = function() { return synth.cancel(); };
+                            window.SpeechSynthesis.prototype.getVoices = function() { return synth.getVoices(); };
+                            try {
+                                Object.defineProperty(window.SpeechSynthesis.prototype, 'speaking', {
+                                    get: function() { return synth.speaking; },
+                                    configurable: true
+                                });
+                                Object.defineProperty(window.SpeechSynthesis.prototype, 'paused', {
+                                    get: function() { return synth.paused; },
+                                    configurable: true
+                                });
+                                Object.defineProperty(window.SpeechSynthesis.prototype, 'pending', {
+                                    get: function() { return synth.pending; },
+                                    configurable: true
+                                });
+                            } catch(propErr){}
+                        }
+                    } catch(protoErr) {
+                        console.warn("[Bridge] SpeechSynthesis prototype hook error", protoErr);
+                    }
 
                     // Dispatch onvoiceschanged
                     function triggerVoicesChanged() {
@@ -1374,8 +1440,29 @@ class NovelTtsBridge(
                                 }
                             }
 
-                            // 4. Fallback DOM button if window.reader is not present (ONLY for Online TTS)
-                            if (window.__is_online_tts_active && (!window.reader || typeof window.reader.resume !== 'function')) {
+                            // Explicitly notify Android bridge to resume native audio
+                            if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.resumeFromWeb === 'function') {
+                                window.AndroidTtsBridge.resumeFromWeb();
+                            } else if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.resume === 'function') {
+                                window.AndroidTtsBridge.resume();
+                            }
+
+                            // Paragraph reader fallback: double-click active sentence if speech didn't start
+                            setTimeout(function() {
+                                try {
+                                    const activePara = document.querySelector(
+                                        '.reading, .tts-reading, .active-sentence, .highlight-reading, .highlight, ' +
+                                        '[data-reading="true"], .current-read, .reading-active, .active-para, .current-sentence'
+                                    );
+                                    if (activePara) {
+                                        const dblEvt = new MouseEvent('dblclick', { bubbles: true, cancelable: true, view: window });
+                                        activePara.dispatchEvent(dblEvt);
+                                    }
+                                } catch(e){}
+                            }, 60);
+
+                            // 4. Fallback DOM button ONLY if window.reader is not present
+                            if (!window.reader || typeof window.reader.resume !== 'function') {
                                 const playBtn = document.querySelector(
                                     '.tts-play:not(.tts-pause):not(.pause):not(.active), ' +
                                     '.btn-play:not(.btn-pause):not(.pause):not(.active), ' +

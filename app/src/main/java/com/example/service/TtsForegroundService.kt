@@ -459,7 +459,26 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
     }
 
     fun onWebAudioStarted(title: String, text: String, engineName: String) {
+        val isDeviceTts = engineName.contains("Device", ignoreCase = true) || engineName.contains("ในเครื่อง", ignoreCase = true)
         webIdleJob?.cancel()
+        if (isDeviceTts) {
+            currentAudioSourceType = AudioSourceType.WEB_SPEECH_API
+            isWebAudioPlaying = false
+            isUserPaused = false
+            _playbackState.update {
+                it.copy(
+                    isPlaying = true,
+                    isPaused = false,
+                    chapterTitle = title.ifBlank { "กำลังอ่านนิยาย" },
+                    currentText = text.ifBlank { "กำลังเล่นเสียง..." },
+                    engineName = "เสียงในเครื่อง (Device TTS)"
+                )
+            }
+            startAsForegroundService()
+            updateForegroundNotification()
+            return
+        }
+
         currentAudioSourceType = AudioSourceType.WEB_AUDIO_STREAM
         isWebAudioPlaying = true
         isUserPaused = false
@@ -482,6 +501,10 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
 
     fun onWebAudioPaused() {
         webIdleJob?.cancel()
+        if (currentAudioSourceType == AudioSourceType.WEB_SPEECH_API) {
+            pauseFromWeb()
+            return
+        }
         // Grace period before setting isPlaying = false to prevent button flickering or cutting off between audio chunks in background
         webIdleJob = serviceScope.launch {
             kotlinx.coroutines.delay(12000L)
@@ -501,6 +524,9 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
 
     fun onWebAudioEnded() {
         webIdleJob?.cancel()
+        if (currentAudioSourceType == AudioSourceType.WEB_SPEECH_API) {
+            return
+        }
         webIdleJob = serviceScope.launch {
             kotlinx.coroutines.delay(12000L)
             if (currentAudioSourceType == AudioSourceType.WEB_AUDIO_STREAM) {
@@ -629,10 +655,12 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
 
     fun resumeFromWeb() {
         isUserPaused = false
+        currentAudioSourceType = AudioSourceType.WEB_SPEECH_API
+        isWebAudioPlaying = false
         val state = _playbackState.value
         webIdleJob?.cancel()
         startAsForegroundService()
-        _playbackState.update { it.copy(isPlaying = true, isPaused = false) }
+        _playbackState.update { it.copy(isPlaying = true, isPaused = false, engineName = "เสียงในเครื่อง (Device TTS)") }
         updateForegroundNotification()
 
         val rate = _playbackState.value.speechRate.takeIf { it in 0.5f..2.5f } ?: prefs.defaultRate
