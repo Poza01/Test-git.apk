@@ -597,33 +597,76 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
                 tts?.setPitch(pitch)
                 _playbackState.value.selectedVoiceName?.let { vName -> setVoice(vName) }
 
-                if (state.currentText.isNotBlank() && state.currentText != "กำลังเล่นเสียง...") {
-                    if (state.currentText.any { it in '\u0E00'..'\u0E7F' }) {
-                        try { tts?.language = Locale("th", "TH") } catch (e: Exception) {}
+                val textToSpeak = when {
+                    state.currentText.isNotBlank() && state.currentText != "กำลังเล่นเสียง..." -> state.currentText
+                    webSpeechHistory.isNotEmpty() -> {
+                        val item = webSpeechHistory.getOrNull(webHistoryIndex) ?: webSpeechHistory.last()
+                        currentWebUtteranceId = item.utteranceId
+                        item.text
                     }
+                    else -> ""
+                }
+
+                if (textToSpeak.isNotBlank()) {
                     val uttId = currentWebUtteranceId ?: "0"
                     val utteranceId = "web_utt_$uttId"
-                    tts?.speak(state.currentText, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
-                } else if (webSpeechHistory.isNotEmpty()) {
-                    val lastItem = webSpeechHistory.getOrNull(webHistoryIndex) ?: webSpeechHistory.last()
-                    currentWebUtteranceId = lastItem.utteranceId
-                    val utteranceId = "web_utt_${lastItem.utteranceId}"
                     _playbackState.update {
                         it.copy(
-                            chapterTitle = lastItem.title.ifBlank { "อ่านนิยายเว็บ" },
-                            currentText = lastItem.text,
+                            currentText = textToSpeak,
                             isPlaying = true,
                             isPaused = false
                         )
                     }
-                    if (lastItem.text.any { it in '\u0E00'..'\u0E7F' }) {
+                    if (textToSpeak.any { it in '\u0E00'..'\u0E7F' }) {
                         try { tts?.language = Locale("th", "TH") } catch (e: Exception) {}
                     }
-                    tts?.speak(lastItem.text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+                    tts?.speak(textToSpeak, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
                 }
                 com.example.bridge.NovelTtsBridge.notifyPlayResumeFromService()
             }
         }
+    }
+
+    fun resumeFromWeb() {
+        isUserPaused = false
+        val state = _playbackState.value
+        webIdleJob?.cancel()
+        startAsForegroundService()
+        _playbackState.update { it.copy(isPlaying = true, isPaused = false) }
+        updateForegroundNotification()
+
+        val rate = _playbackState.value.speechRate.takeIf { it in 0.5f..2.5f } ?: prefs.defaultRate
+        val pitch = _playbackState.value.speechPitch.takeIf { it in 0.5f..1.8f } ?: prefs.defaultPitch
+        tts?.setSpeechRate(rate)
+        tts?.setPitch(pitch)
+        _playbackState.value.selectedVoiceName?.let { vName -> setVoice(vName) }
+
+        val textToSpeak = when {
+            state.currentText.isNotBlank() && state.currentText != "กำลังเล่นเสียง..." -> state.currentText
+            webSpeechHistory.isNotEmpty() -> {
+                val item = webSpeechHistory.getOrNull(webHistoryIndex) ?: webSpeechHistory.last()
+                currentWebUtteranceId = item.utteranceId
+                item.text
+            }
+            else -> ""
+        }
+
+        if (textToSpeak.isNotBlank()) {
+            val uttId = currentWebUtteranceId ?: "0"
+            val utteranceId = "web_utt_$uttId"
+            _playbackState.update {
+                it.copy(
+                    currentText = textToSpeak,
+                    isPlaying = true,
+                    isPaused = false
+                )
+            }
+            if (textToSpeak.any { it in '\u0E00'..'\u0E7F' }) {
+                try { tts?.language = Locale("th", "TH") } catch (e: Exception) {}
+            }
+            tts?.speak(textToSpeak, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+        }
+        // Do NOT call notifyPlayResumeFromService() here because web initiated the resume
     }
 
     fun pauseFromWeb() {
@@ -651,8 +694,7 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
         _playbackState.update {
             it.copy(
                 isPlaying = false,
-                isPaused = false,
-                currentText = ""
+                isPaused = false
             )
         }
         updateForegroundNotification()
