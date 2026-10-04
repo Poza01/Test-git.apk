@@ -600,36 +600,9 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
             }
             AudioSourceType.WEB_SPEECH_API -> {
                 // Device TTS (Web Speech API)
-                val rate = _playbackState.value.speechRate.takeIf { it in 0.5f..2.5f } ?: prefs.defaultRate
-                val pitch = _playbackState.value.speechPitch.takeIf { it in 0.5f..1.8f } ?: prefs.defaultPitch
-                tts?.setSpeechRate(rate)
-                tts?.setPitch(pitch)
-                _playbackState.value.selectedVoiceName?.let { vName -> setVoice(vName) }
-
-                val textToSpeak = when {
-                    state.currentText.isNotBlank() && state.currentText != "กำลังเล่นเสียง..." -> state.currentText
-                    webSpeechHistory.isNotEmpty() -> {
-                        val item = webSpeechHistory.getOrNull(webHistoryIndex) ?: webSpeechHistory.last()
-                        currentWebUtteranceId = item.utteranceId
-                        item.text
-                    }
-                    else -> ""
-                }
-
-                if (textToSpeak.isNotBlank()) {
-                    val uttId = currentWebUtteranceId ?: "0"
-                    val utteranceId = "web_utt_$uttId"
-                    _playbackState.update {
-                        it.copy(
-                            currentText = textToSpeak,
-                            isPlaying = true,
-                            isPaused = false
-                        )
-                    }
-                    if (textToSpeak.any { it in '\u0E00'..'\u0E7F' }) {
-                        try { tts?.language = Locale("th", "TH") } catch (e: Exception) {}
-                    }
-                    tts?.speak(textToSpeak, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+                // Stop any leftover speech first and notify the web reader to resume its speech synthesis queue cleanly
+                if (tts?.isSpeaking == true) {
+                    tts?.stop()
                 }
                 com.example.bridge.NovelTtsBridge.notifyPlayResumeFromService()
             }
@@ -637,6 +610,11 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
     }
 
     fun resumeFromWeb() {
+        // Prevent on-device TTS from interrupting online HTML5 audio streams
+        if (currentAudioSourceType == AudioSourceType.WEB_AUDIO_STREAM || isWebAudioPlaying) {
+            Log.d(TAG, "Ignoring resumeFromWeb because HTML5 Web Audio Stream is active")
+            return
+        }
         isUserPaused = false
         currentAudioSourceType = AudioSourceType.WEB_SPEECH_API
         isWebAudioPlaying = false
@@ -653,7 +631,7 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
         _playbackState.value.selectedVoiceName?.let { vName -> setVoice(vName) }
 
         val textToSpeak = when {
-            state.currentText.isNotBlank() && state.currentText != "กำลังเล่นเสียง..." -> state.currentText
+            state.currentText.isNotBlank() && state.currentText != "กำลังเล่นเสียง..." && state.currentText != "กำลังอ่านนิยาย" -> state.currentText
             webSpeechHistory.isNotEmpty() -> {
                 val item = webSpeechHistory.getOrNull(webHistoryIndex) ?: webSpeechHistory.last()
                 currentWebUtteranceId = item.utteranceId
@@ -662,7 +640,7 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
             else -> ""
         }
 
-        if (textToSpeak.isNotBlank()) {
+        if (textToSpeak.isNotBlank() && textToSpeak != "กำลังเล่นเสียง...") {
             val uttId = currentWebUtteranceId ?: "0"
             val utteranceId = "web_utt_$uttId"
             _playbackState.update {
@@ -677,7 +655,6 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
             }
             tts?.speak(textToSpeak, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
         }
-        // Do NOT call notifyPlayResumeFromService() here because web initiated the resume
     }
 
     fun pauseFromWeb() {
@@ -746,22 +723,8 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
             }
             AudioSourceType.WEB_SPEECH_API -> {
                 // Device TTS (Web Speech API)
-                if (webSpeechHistory.isNotEmpty() && webHistoryIndex >= 0 && webHistoryIndex < webSpeechHistory.size - 1) {
-                    webHistoryIndex++
-                    val nextItem = webSpeechHistory[webHistoryIndex]
-                    webIdleJob?.cancel()
-                    currentWebUtteranceId = nextItem.utteranceId
-                    _playbackState.update {
-                        it.copy(
-                            chapterTitle = nextItem.title.ifBlank { "อ่านนิยายเว็บ" },
-                            currentText = nextItem.text,
-                            isPlaying = true,
-                            isPaused = false
-                        )
-                    }
-                    updateForegroundNotification()
-                    val utteranceId = "web_utt_${nextItem.utteranceId}"
-                    tts?.speak(nextItem.text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+                if (tts?.isSpeaking == true) {
+                    tts?.stop()
                 }
                 com.example.bridge.NovelTtsBridge.notifyNextFromService()
             }
@@ -784,22 +747,8 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
             }
             AudioSourceType.WEB_SPEECH_API -> {
                 // Device TTS (Web Speech API)
-                if (webSpeechHistory.isNotEmpty() && webHistoryIndex > 0) {
-                    webHistoryIndex--
-                    val prevItem = webSpeechHistory[webHistoryIndex]
-                    webIdleJob?.cancel()
-                    currentWebUtteranceId = prevItem.utteranceId
-                    _playbackState.update {
-                        it.copy(
-                            chapterTitle = prevItem.title.ifBlank { "อ่านนิยายเว็บ" },
-                            currentText = prevItem.text,
-                            isPlaying = true,
-                            isPaused = false
-                        )
-                    }
-                    updateForegroundNotification()
-                    val utteranceId = "web_utt_${prevItem.utteranceId}"
-                    tts?.speak(prevItem.text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+                if (tts?.isSpeaking == true) {
+                    tts?.stop()
                 }
                 com.example.bridge.NovelTtsBridge.notifyPrevFromService()
             }

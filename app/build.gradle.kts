@@ -17,8 +17,8 @@ android {
     applicationId = "com.aistudio.noveltts.kxwvyq"
     minSdk = 24
     targetSdk = 36
-    versionCode = 18
-    versionName = "2.7"
+    versionCode = 19
+    versionName = "2.8"
 
     buildConfigField("String", "GITHUB_REPOSITORY", "\"${System.getenv("GITHUB_REPOSITORY") ?: ""}\"")
 

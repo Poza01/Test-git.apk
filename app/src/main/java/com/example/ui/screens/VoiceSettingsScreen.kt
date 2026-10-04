@@ -404,28 +404,6 @@ fun VoiceSettingsScreen(
 
                     Spacer(modifier = Modifier.height(14.dp))
 
-                    OutlinedTextField(
-                        value = currentRepo,
-                        onValueChange = {
-                            currentRepo = it
-                            com.example.update.AppUpdateManager.saveRepo(context, it)
-                        },
-                        label = { Text("GitHub Repo (owner/repo)") },
-                        placeholder = { Text("เช่น username/repository") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = AmberPrimary,
-                            unfocusedBorderColor = DarkBorder,
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color(0xFFD1D5DB),
-                            focusedLabelColor = AmberPrimary,
-                            unfocusedLabelColor = Color(0xFF9CA3AF)
-                        )
-                    )
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
                     if (isDownloading) {
                         Column(modifier = Modifier.fillMaxWidth()) {
                             Text(
@@ -494,17 +472,16 @@ fun VoiceSettingsScreen(
                         ) {
                             androidx.compose.material3.Button(
                                 onClick = {
-                                    if (currentRepo.isBlank() || !currentRepo.contains("/")) {
-                                        Toast.makeText(context, "กรุณากรอก GitHub Repo ในรูปแบบ username/repo", Toast.LENGTH_SHORT).show()
-                                        return@Button
-                                    }
+                                    val repoToCheck = currentRepo.ifBlank { BuildConfig.GITHUB_REPOSITORY }
                                     scope.launch {
                                         isChecking = true
                                         statusMessage = null
-                                        val info = com.example.update.AppUpdateManager.checkUpdate(context, currentRepo)
+                                        val info = com.example.update.AppUpdateManager.checkUpdate(context, repoToCheck)
                                         isChecking = false
                                         updateInfo = info
-                                        if (!info.hasUpdate) {
+                                        if (info.hasUpdate) {
+                                            // Handled in UI
+                                        } else {
                                             statusMessage = "แอปของคุณเป็นเวอร์ชันล่าสุดแล้ว (v${BuildConfig.VERSION_NAME})"
                                         }
                                     }

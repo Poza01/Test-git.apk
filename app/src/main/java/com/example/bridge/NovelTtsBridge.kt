@@ -1007,6 +1007,7 @@ class NovelTtsBridge(
                         }
                     };
 
+                    let cancelDebounceTimer = null;
                     const synth = {
                         speaking: false,
                         paused: false,
@@ -1020,6 +1021,12 @@ class NovelTtsBridge(
                             try {
                                 if (!utterance) return;
 
+                                // Cancel any pending stop from cancel() since a new sentence is speaking immediately
+                                if (cancelDebounceTimer) {
+                                    clearTimeout(cancelDebounceTimer);
+                                    cancelDebounceTimer = null;
+                                }
+
                                 // Clear any pending HTML5 audio debounce timers
                                 if (webAudioPauseDebounceTimer) {
                                     clearTimeout(webAudioPauseDebounceTimer);
@@ -1028,10 +1035,6 @@ class NovelTtsBridge(
                                 if (webAudioDebounceTimer) {
                                     clearTimeout(webAudioDebounceTimer);
                                     webAudioDebounceTimer = null;
-                                }
-                                if (window.__cancel_stop_timer) {
-                                    clearTimeout(window.__cancel_stop_timer);
-                                    window.__cancel_stop_timer = null;
                                 }
 
                                 // If any HTML5 audio stream (Google/Edge TTS) was playing, pause it and reset
@@ -1081,24 +1084,27 @@ class NovelTtsBridge(
                                 synth.paused = false;
                                 synth.pending = false;
 
-                                if (window.__cancel_stop_timer) {
-                                    clearTimeout(window.__cancel_stop_timer);
-                                    window.__cancel_stop_timer = null;
-                                }
-                                // If no new utterance is queued in this event cycle, user pressed Pause/Stop in Web UI!
-                                window.__cancel_stop_timer = setTimeout(function() {
-                                    if (!synth.speaking && (!window.__android_speech_queue || window.__android_speech_queue.length === 0)) {
+                                // Smart Debounced Stop:
+                                // If web reader called cancel() as a sentence transition, speak() follows in <50ms and cancels this timer.
+                                // If user actually clicked STOP/PAUSE on the web player, no speak() follows, so we silence native TTS immediately!
+                                if (cancelDebounceTimer) clearTimeout(cancelDebounceTimer);
+                                cancelDebounceTimer = setTimeout(function() {
+                                    if (!synth.speaking && window.__android_speech_queue.length === 0) {
                                         if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.pauseFromWeb === 'function') {
                                             window.AndroidTtsBridge.pauseFromWeb();
                                         }
                                     }
-                                }, 50);
+                                }, 80);
                             } catch(e) {}
                         },
                         pause: function() {
                             try {
+                                if (cancelDebounceTimer) {
+                                    clearTimeout(cancelDebounceTimer);
+                                    cancelDebounceTimer = null;
+                                }
                                 synth.paused = true;
-                                synth.speaking = true;
+                                synth.speaking = false;
                                 isProcessingQueue = false;
                                 if (window.__android_active_utterance_id) {
                                     window.__last_active_utterance_id = window.__android_active_utterance_id;
@@ -1422,32 +1428,36 @@ class NovelTtsBridge(
                                 }
                             });
 
-                            // 3. Resume SpeechSynthesis state & process queue (Device TTS)
-                            isProcessingQueue = false;
-                            if (window.speechSynthesis) {
-                                window.speechSynthesis.paused = false;
-                                window.speechSynthesis.speaking = true;
-                            }
-                            const resumeUttId = window.__android_active_utterance_id || window.__last_active_utterance_id;
-                            if (window.__android_speech_queue && window.__android_speech_queue.length > 0) {
-                                window.__android_process_next_queue();
-                            } else if (resumeUttId) {
-                                const utt = (window.__android_tts_utterances || {})[resumeUttId];
-                                if (utt) {
-                                    dispatchUtteranceEvent(utt, 'resume');
+                            // Resume Web Audio API AudioContext if suspended
+                            try {
+                                if (window.__active_audio_context && window.__active_audio_context.state === 'suspended') {
+                                    window.__active_audio_context.resume();
                                 }
-                            }
+                            } catch(ctxErr){}
 
-                            // Explicitly notify Android bridge to resume native audio
-                            if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.resumeFromWeb === 'function') {
-                                window.AndroidTtsBridge.resumeFromWeb();
-                            } else if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.resume === 'function') {
-                                window.AndroidTtsBridge.resume();
-                            }
+                            // 3. Resume SpeechSynthesis state & process queue (Device TTS)
+                            if (!window.__is_online_tts_active) {
+                                isProcessingQueue = false;
+                                if (window.speechSynthesis) {
+                                    window.speechSynthesis.paused = false;
+                                    window.speechSynthesis.speaking = true;
+                                }
+                                const resumeUttId = window.__android_active_utterance_id || window.__last_active_utterance_id;
+                                if (window.__android_speech_queue && window.__android_speech_queue.length > 0) {
+                                    window.__android_process_next_queue();
+                                } else if (resumeUttId) {
+                                    const utt = (window.__android_tts_utterances || {})[resumeUttId];
+                                    if (utt) {
+                                        dispatchUtteranceEvent(utt, 'resume');
+                                    }
+                                }
 
-                            // If window.reader exists, invoke resume directly
-                            if (window.reader && typeof window.reader.resume === 'function') {
-                                try { window.reader.resume(); } catch(e){}
+                                // Explicitly notify Android bridge to resume native audio if device TTS
+                                if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.resumeFromWeb === 'function') {
+                                    window.AndroidTtsBridge.resumeFromWeb();
+                                } else if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.resume === 'function') {
+                                    window.AndroidTtsBridge.resume();
+                                }
                             }
                             return true;
                         } catch(e) {
@@ -1476,32 +1486,31 @@ class NovelTtsBridge(
 
                             // 2. Pause all HTML5 Audio directly (Online TTS)
                             if (window.__active_html5_audio && !window.__active_html5_audio.paused) {
-                                window.__active_html5_audio.pause();
+                                try { window.__active_html5_audio.pause(); } catch(e){}
                             }
                             document.querySelectorAll('audio').forEach(a => {
                                 if (!a.paused) {
-                                    a.pause();
+                                    try { a.pause(); } catch(e){}
                                 }
                             });
+
+                            // Suspend Web Audio API AudioContext if running
+                            try {
+                                if (window.__active_audio_context && window.__active_audio_context.state === 'running') {
+                                    window.__active_audio_context.suspend();
+                                }
+                            } catch(ctxErr){}
 
                             // 3. Pause SpeechSynthesis & release queue lock (Device TTS)
                             isProcessingQueue = false;
                             if (window.speechSynthesis) {
                                 window.speechSynthesis.paused = true;
-                                window.speechSynthesis.speaking = true;
+                                window.speechSynthesis.speaking = false;
                             }
                             if (window.__android_active_utterance_id) {
                                 const utt = (window.__android_tts_utterances || {})[window.__android_active_utterance_id];
                                 if (utt) {
                                     dispatchUtteranceEvent(utt, 'pause');
-                                }
-                            }
-
-                            // 4. Fallback DOM button if window.reader is not present
-                            if (!window.reader || typeof window.reader.pause !== 'function') {
-                                const pauseBtn = document.querySelector('.tts-pause, [data-action="pause"], #pause-button, .reader-pause.active, .audio-pause, .pause-btn, [aria-label*="Pause" i], [title*="หยุด" i], [aria-label*="หยุด" i], .fa-pause, .btn-pause, .tts-play.active, .btn-play.active');
-                                if (pauseBtn) {
-                                    simulateFullClick(pauseBtn);
                                 }
                             }
                             return true;

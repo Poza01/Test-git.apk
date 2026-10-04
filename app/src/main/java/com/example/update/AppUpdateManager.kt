@@ -36,8 +36,7 @@ object AppUpdateManager {
 
     fun getSavedRepo(context: Context): String {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val saved = prefs.getString(KEY_REPO, "") ?: ""
-        return if (saved.isNotBlank()) saved else BuildConfig.GITHUB_REPOSITORY
+        return prefs.getString(KEY_REPO, "") ?: ""
     }
 
     fun saveRepo(context: Context, repo: String) {
