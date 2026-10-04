@@ -270,33 +270,15 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
                         onUtteranceEvent?.invoke("ondone", utteranceId)
                     }
                     if (utteranceId?.startsWith("web_utt_") == true) {
-                        // If we are rewound in history and there are subsequent lines in history, read next line automatically!
-                        if (webHistoryIndex >= 0 && webHistoryIndex < webSpeechHistory.size - 1) {
-                            webHistoryIndex++
-                            val nextItem = webSpeechHistory[webHistoryIndex]
-                            currentWebUtteranceId = nextItem.utteranceId
-                            _playbackState.update {
-                                it.copy(
-                                    chapterTitle = nextItem.title.ifBlank { "อ่านนิยายเว็บ" },
-                                    currentText = nextItem.text,
-                                    isPlaying = true,
-                                    isPaused = false
-                                )
-                            }
-                            updateForegroundNotification()
-                            val nextUtteranceId = "web_utt_${nextItem.utteranceId}"
-                            tts?.speak(nextItem.text, TextToSpeech.QUEUE_FLUSH, null, nextUtteranceId)
-                        } else {
-                            val expectedId = "web_utt_$currentWebUtteranceId"
-                            if (utteranceId == expectedId) {
-                                webIdleJob?.cancel()
-                                webIdleJob = serviceScope.launch {
-                                    // Wait 8 seconds of continuous silence before marking as idle/stopped
-                                    kotlinx.coroutines.delay(8000L)
-                                    if (_playbackState.value.isPlaying && !isWebAudioPlaying && tts?.isSpeaking != true) {
-                                        _playbackState.update { it.copy(isPlaying = false, isPaused = false) }
-                                        updateForegroundNotification()
-                                    }
+                        val expectedId = "web_utt_$currentWebUtteranceId"
+                        if (utteranceId == expectedId) {
+                            webIdleJob?.cancel()
+                            webIdleJob = serviceScope.launch {
+                                // Wait 8 seconds of continuous silence before marking as idle/stopped
+                                kotlinx.coroutines.delay(8000L)
+                                if (_playbackState.value.isPlaying && !isWebAudioPlaying && tts?.isSpeaking != true) {
+                                    _playbackState.update { it.copy(isPlaying = false, isPaused = false) }
+                                    updateForegroundNotification()
                                 }
                             }
                         }

@@ -20,6 +20,8 @@ android {
     versionCode = 14
     versionName = "2.3"
 
+    buildConfigField("String", "GITHUB_REPOSITORY", "\"${System.getenv("GITHUB_REPOSITORY") ?: ""}\"")
+
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 

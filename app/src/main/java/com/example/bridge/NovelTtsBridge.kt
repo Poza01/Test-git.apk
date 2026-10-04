@@ -1115,20 +1115,6 @@ class NovelTtsBridge(
                                 } else if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.resume === 'function') {
                                     window.AndroidTtsBridge.resume();
                                 }
-
-                                // Fallback double-click on active line if reader uses paragraph selection
-                                setTimeout(function() {
-                                    try {
-                                        const activePara = document.querySelector(
-                                            '.reading, .tts-reading, .active-sentence, .highlight-reading, .highlight, ' +
-                                            '[data-reading="true"], .current-read, .reading-active, .active-para, .current-sentence'
-                                        );
-                                        if (activePara) {
-                                            const dblEvt = new MouseEvent('dblclick', { bubbles: true, cancelable: true, view: window });
-                                            activePara.dispatchEvent(dblEvt);
-                                        }
-                                    } catch(e){}
-                                }, 60);
                             } catch(e) {}
                         }
                     };
@@ -1447,42 +1433,9 @@ class NovelTtsBridge(
                                 window.AndroidTtsBridge.resume();
                             }
 
-                            // Paragraph reader fallback: double-click active sentence if speech didn't start
-                            setTimeout(function() {
-                                try {
-                                    const activePara = document.querySelector(
-                                        '.reading, .tts-reading, .active-sentence, .highlight-reading, .highlight, ' +
-                                        '[data-reading="true"], .current-read, .reading-active, .active-para, .current-sentence'
-                                    );
-                                    if (activePara) {
-                                        const dblEvt = new MouseEvent('dblclick', { bubbles: true, cancelable: true, view: window });
-                                        activePara.dispatchEvent(dblEvt);
-                                    }
-                                } catch(e){}
-                            }, 60);
-
-                            // 4. Fallback DOM button ONLY if window.reader is not present
-                            if (!window.reader || typeof window.reader.resume !== 'function') {
-                                const playBtn = document.querySelector(
-                                    '.tts-play:not(.tts-pause):not(.pause):not(.active), ' +
-                                    '.btn-play:not(.btn-pause):not(.pause):not(.active), ' +
-                                    '[data-action="play"]:not(.active):not(.pause), ' +
-                                    '#play-button:not(.paused):not(.active), ' +
-                                    '.reader-play:not(.active):not(.pause), ' +
-                                    '.audio-play:not(.paused):not(.active):not(.pause), ' +
-                                    '.play-btn:not(.active):not(.pause), ' +
-                                    '.btn-read-play:not(.active):not(.pause), ' +
-                                    '[aria-label*="Play" i]:not(.active):not([aria-label*="Pause" i]), ' +
-                                    '[title*="เล่น" i]:not(.active):not([title*="หยุด" i]), ' +
-                                    '[title*="Play" i]:not(.active):not([title*="Pause" i]), ' +
-                                    '[aria-label*="เล่น" i]:not(.active):not([aria-label*="หยุด" i]), ' +
-                                    '.fa-play:not(.fa-pause), ' +
-                                    '[data-action="tts-play"]:not(.active), ' +
-                                    '#btn-tts-play:not(.active)'
-                                );
-                                if (playBtn && !playBtn.classList.contains('fa-pause') && !playBtn.classList.contains('pause') && !playBtn.classList.contains('active')) {
-                                    simulateFullClick(playBtn);
-                                }
+                            // If window.reader exists, invoke resume directly
+                            if (window.reader && typeof window.reader.resume === 'function') {
+                                try { window.reader.resume(); } catch(e){}
                             }
                             return true;
                         } catch(e) {

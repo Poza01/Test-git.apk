@@ -4,6 +4,8 @@ import android.content.Intent
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import com.example.BuildConfig
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -344,6 +346,193 @@ fun VoiceSettingsScreen(
                                 fontWeight = FontWeight.Bold,
                                 color = AmberPrimary
                             )
+                        }
+                    }
+                }
+            }
+        }
+
+        // App Update Card
+        item {
+            val scope = androidx.compose.runtime.rememberCoroutineScope()
+            var currentRepo by remember {
+                mutableStateOf(com.example.update.AppUpdateManager.getSavedRepo(context))
+            }
+            var isChecking by remember { mutableStateOf(false) }
+            var isDownloading by remember { mutableStateOf(false) }
+            var downloadProgress by remember { mutableStateOf(0f) }
+            var updateInfo by remember { mutableStateOf<com.example.update.UpdateInfo?>(null) }
+            var statusMessage by remember { mutableStateOf<String?>(null) }
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(AmberPrimary.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = "อัปเดต",
+                                tint = AmberPrimary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = "อัปเดตเวอร์ชันแอป",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Text(
+                                text = "เวอร์ชันปัจจุบัน: v${BuildConfig.VERSION_NAME} (Build ${BuildConfig.VERSION_CODE})",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(0xFF9CA3AF)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    OutlinedTextField(
+                        value = currentRepo,
+                        onValueChange = {
+                            currentRepo = it
+                            com.example.update.AppUpdateManager.saveRepo(context, it)
+                        },
+                        label = { Text("GitHub Repo (owner/repo)") },
+                        placeholder = { Text("เช่น username/repository") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = AmberPrimary,
+                            unfocusedBorderColor = DarkBorder,
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color(0xFFD1D5DB),
+                            focusedLabelColor = AmberPrimary,
+                            unfocusedLabelColor = Color(0xFF9CA3AF)
+                        )
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    if (isDownloading) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Text(
+                                text = "กำลังดาวน์โหลดไฟล์อัปเดต ${(downloadProgress * 100).toInt()}%...",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = AmberPrimary
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            androidx.compose.material3.LinearProgressIndicator(
+                                progress = { downloadProgress },
+                                modifier = Modifier.fillMaxWidth(),
+                                color = AmberPrimary,
+                                trackColor = Color(0xFF2A2A2E)
+                            )
+                        }
+                    } else if (updateInfo?.hasUpdate == true) {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(containerColor = EmeraldSuccess.copy(alpha = 0.12f)),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, EmeraldSuccess.copy(alpha = 0.4f))
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(
+                                    text = "🎉 พบเวอร์ชันใหม่: v${updateInfo?.latestVersionName}",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = EmeraldSuccess
+                                )
+                                if (!updateInfo?.releaseNotes.isNullOrBlank()) {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = updateInfo?.releaseNotes ?: "",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color(0xFFE5E7EB),
+                                        maxLines = 3
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(10.dp))
+                                androidx.compose.material3.Button(
+                                    onClick = {
+                                        scope.launch {
+                                            isDownloading = true
+                                            val url = updateInfo?.downloadUrl ?: ""
+                                            val success = com.example.update.AppUpdateManager.downloadAndInstallApk(
+                                                context, url
+                                            ) { p -> downloadProgress = p }
+                                            isDownloading = false
+                                            if (!success) {
+                                                Toast.makeText(context, "ดาวน์โหลดล้มเหลว กรุณาลองใหม่", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = EmeraldSuccess)
+                                ) {
+                                    Text("ดาวน์โหลดและติดตั้งอัปเดตทันที", color = Color.Black, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            androidx.compose.material3.Button(
+                                onClick = {
+                                    if (currentRepo.isBlank() || !currentRepo.contains("/")) {
+                                        Toast.makeText(context, "กรุณากรอก GitHub Repo ในรูปแบบ username/repo", Toast.LENGTH_SHORT).show()
+                                        return@Button
+                                    }
+                                    scope.launch {
+                                        isChecking = true
+                                        statusMessage = null
+                                        val info = com.example.update.AppUpdateManager.checkUpdate(context, currentRepo)
+                                        isChecking = false
+                                        updateInfo = info
+                                        if (!info.hasUpdate) {
+                                            statusMessage = "แอปของคุณเป็นเวอร์ชันล่าสุดแล้ว (v${BuildConfig.VERSION_NAME})"
+                                        }
+                                    }
+                                },
+                                enabled = !isChecking,
+                                colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = AmberPrimary)
+                            ) {
+                                if (isChecking) {
+                                    androidx.compose.material3.CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        strokeWidth = 2.dp,
+                                        color = Color.Black
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("กำลังตรวจหา...", color = Color.Black)
+                                } else {
+                                    Text("ตรวจหาอัปเดต", color = Color.Black, fontWeight = FontWeight.Bold)
+                                }
+                            }
+
+                            if (statusMessage != null) {
+                                Text(
+                                    text = statusMessage ?: "",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFF9CA3AF),
+                                    modifier = Modifier.padding(start = 8.dp)
+                                )
+                            }
                         }
                     }
                 }
