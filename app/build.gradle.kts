@@ -19,6 +19,7 @@ android {
     targetSdk = 36
     versionCode = 20
     versionName = "2.8"
+    buildConfigField("String", "GITHUB_REPOSITORY", "\"\"")
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
