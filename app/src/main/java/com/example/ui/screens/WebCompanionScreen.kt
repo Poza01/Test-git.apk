@@ -882,6 +882,13 @@ fun WebCompanionScreen(
                             ViewGroup.LayoutParams.MATCH_PARENT
                         )
 
+                        // Hardware Acceleration & Smooth Scroll Physics
+                        setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
+                        isVerticalScrollBarEnabled = false
+                        isHorizontalScrollBarEnabled = false
+                        isScrollbarFadingEnabled = true
+                        overScrollMode = android.view.View.OVER_SCROLL_IF_CONTENT_SCROLLS
+
                         // Enable cookies and 3rd party cookies for SPA/Auth sites
                         val webViewInstanceRef = this
                         android.webkit.CookieManager.getInstance().apply {
@@ -905,9 +912,10 @@ fun WebCompanionScreen(
                             cacheMode = WebSettings.LOAD_DEFAULT
                             mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                             userAgentString = "$userAgentString NovelAI-AndroidBridge/1.0"
-                            // Prevent background timer suspension
-                            useWideViewPort = true
-                            loadWithOverviewMode = true
+                            // Performance & RAM optimizations for budget/midrange SoCs
+                            setRenderPriority(WebSettings.RenderPriority.HIGH)
+                            setEnableSmoothTransition(true)
+                            offscreenPreRaster = false
                         }
 
                         // Prevent background throttling of timers in WebView

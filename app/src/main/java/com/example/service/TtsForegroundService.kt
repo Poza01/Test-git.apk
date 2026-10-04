@@ -261,14 +261,15 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
             }
 
             override fun onDone(utteranceId: String?) {
+                if (isUserPaused || _playbackState.value.isPaused) {
+                    Log.d(TAG, "Ignoring onDone because user is paused: $utteranceId")
+                    return
+                }
+                // Dispatch ondone to WebView immediately with ZERO coroutine latency
+                if (!utteranceId.isNullOrBlank()) {
+                    onUtteranceEvent?.invoke("ondone", utteranceId)
+                }
                 serviceScope.launch {
-                    if (isUserPaused || _playbackState.value.isPaused) {
-                        Log.d(TAG, "Ignoring onDone because user is paused: $utteranceId")
-                        return@launch
-                    }
-                    if (!utteranceId.isNullOrBlank()) {
-                        onUtteranceEvent?.invoke("ondone", utteranceId)
-                    }
                     if (utteranceId?.startsWith("web_utt_") == true) {
                         val expectedId = "web_utt_$currentWebUtteranceId"
                         if (utteranceId == expectedId) {
@@ -483,8 +484,8 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
 
     fun onWebAudioPaused() {
         webIdleJob?.cancel()
-        if (currentAudioSourceType == AudioSourceType.WEB_SPEECH_API) {
-            pauseFromWeb()
+        if (currentAudioSourceType != AudioSourceType.WEB_AUDIO_STREAM) {
+            // NEVER pause or kill on-device Web Speech API when HTML5 audio triggers pause events
             return
         }
         // Grace period before setting isPlaying = false to prevent button flickering or cutting off between audio chunks in background
@@ -506,7 +507,7 @@ class TtsForegroundService : Service(), TextToSpeech.OnInitListener {
 
     fun onWebAudioEnded() {
         webIdleJob?.cancel()
-        if (currentAudioSourceType == AudioSourceType.WEB_SPEECH_API) {
+        if (currentAudioSourceType != AudioSourceType.WEB_AUDIO_STREAM) {
             return
         }
         webIdleJob = serviceScope.launch {

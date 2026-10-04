@@ -38,10 +38,14 @@ class NovelTtsBridge(
         activeBridge = this
         val service = getService() ?: TtsForegroundService.instance ?: return
         service.onUtteranceEvent = { event, utteranceId ->
-            mainHandler.post {
-                val cleanId = utteranceId.removePrefix("web_utt_")
-                val js = "if (window.__android_tts_callback) { window.__android_tts_callback('$event', '$cleanId'); }"
+            val cleanId = utteranceId.removePrefix("web_utt_")
+            val js = "if (window.__android_tts_callback) { window.__android_tts_callback('$event', '$cleanId'); }"
+            if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
                 getWebView()?.evaluateJavascript(js, null)
+            } else {
+                mainHandler.post {
+                    getWebView()?.evaluateJavascript(js, null)
+                }
             }
         }
     }
@@ -564,24 +568,6 @@ class NovelTtsBridge(
                         document.addEventListener('visibilitychange', function(e) {
                             e.stopImmediatePropagation();
                         }, true);
-
-                        const origRAF = window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : null;
-                        let lastRafCall = Date.now();
-                        window.requestAnimationFrame = function(callback) {
-                            const now = Date.now();
-                            if (now - lastRafCall > 150) {
-                                lastRafCall = now;
-                                return setTimeout(function() {
-                                    callback(Date.now());
-                                }, 16);
-                            }
-                            lastRafCall = now;
-                            if (origRAF) {
-                                return origRAF(callback);
-                            } else {
-                                return setTimeout(function() { callback(Date.now()); }, 16);
-                            }
-                        };
                     } catch(vErr) {
                         console.warn("Visibility polyfill error", vErr);
                     }
@@ -949,8 +935,11 @@ class NovelTtsBridge(
                     try {
                         let lastObservedTitle = document.title;
                         let lastObservedText = '';
+                        let spaObserverDebounce = null;
                         const spaObserver = new MutationObserver(function() {
-                            if (sessionStorage.getItem('__novel_auto_play_next') === 'true') {
+                            if (sessionStorage.getItem('__novel_auto_play_next') !== 'true') return;
+                            if (spaObserverDebounce) clearTimeout(spaObserverDebounce);
+                            spaObserverDebounce = setTimeout(function() {
                                 const currentTitle = document.title;
                                 const mainContent = document.querySelector('.chapter-content, #chapter-content, .novel-content, #novel-content, .reading-content, .content, article, main, .entry-content');
                                 const textSample = mainContent ? (mainContent.innerText || '').substring(0, 150) : '';
@@ -959,23 +948,21 @@ class NovelTtsBridge(
                                     lastObservedTitle = currentTitle;
                                     lastObservedText = textSample;
                                     console.log("[NovelAI Bridge] SPA Reader content updated! Starting auto-play for next chapter.");
-                                    setTimeout(function() {
-                                        const playBtn = document.querySelector('.btn-read, .btn-play, #btn-tts, #read-novel, [data-action="auto-read"], .tts-play, #play-button, .reader-play, .audio-play, .play-btn, .btn-read-play, .tts-btn, #tts-play, button[title*="อ่าน"], button[title*="Play"], [aria-label*="Play"], [aria-label*="อ่าน"], [title*="เล่น"], [title*="Play"], button:has(.fa-play), .fa-play, [data-action="read"], .btn-start-read');
-                                        if (playBtn) {
-                                            sessionStorage.removeItem('__novel_auto_play_next');
-                                            simulateFullClick(playBtn);
-                                        } else if (window.reader && typeof window.reader.play === 'function') {
-                                            sessionStorage.removeItem('__novel_auto_play_next');
-                                            window.reader.play();
-                                        } else if (typeof window.readNovel === 'function') {
-                                            sessionStorage.removeItem('__novel_auto_play_next');
-                                            window.readNovel();
-                                        }
-                                    }, 400);
+                                    const playBtn = document.querySelector('.btn-read, .btn-play, #btn-tts, #read-novel, [data-action="auto-read"], .tts-play, #play-button, .reader-play, .audio-play, .play-btn, .btn-read-play, .tts-btn, #tts-play, button[title*="อ่าน"], button[title*="Play"], [aria-label*="Play"], [aria-label*="อ่าน"], [title*="เล่น"], [title*="Play"], button:has(.fa-play), .fa-play, [data-action="read"], .btn-start-read');
+                                    if (playBtn) {
+                                        sessionStorage.removeItem('__novel_auto_play_next');
+                                        simulateFullClick(playBtn);
+                                    } else if (window.reader && typeof window.reader.play === 'function') {
+                                        sessionStorage.removeItem('__novel_auto_play_next');
+                                        window.reader.play();
+                                    } else if (typeof window.readNovel === 'function') {
+                                        sessionStorage.removeItem('__novel_auto_play_next');
+                                        window.readNovel();
+                                    }
                                 }
-                            }
+                            }, 150);
                         });
-                        spaObserver.observe(document.body || document.documentElement, { childList: true, subtree: true, characterData: true });
+                        spaObserver.observe(document.body || document.documentElement, { childList: true, subtree: true });
                     } catch(obsErr) {
                         console.warn("SPA observer error", obsErr);
                     }
@@ -1033,9 +1020,20 @@ class NovelTtsBridge(
                             try {
                                 if (!utterance) return;
 
-                                // If any HTML5 audio stream (Google/Edge TTS) was playing, pause it so they don't overlap
-                                if (window.__active_html5_audio && !window.__active_html5_audio.paused) {
+                                // Clear any pending HTML5 audio debounce timers
+                                if (webAudioPauseDebounceTimer) {
+                                    clearTimeout(webAudioPauseDebounceTimer);
+                                    webAudioPauseDebounceTimer = null;
+                                }
+                                if (webAudioDebounceTimer) {
+                                    clearTimeout(webAudioDebounceTimer);
+                                    webAudioDebounceTimer = null;
+                                }
+
+                                // If any HTML5 audio stream (Google/Edge TTS) was playing, pause it and reset
+                                if (window.__active_html5_audio) {
                                     try { window.__active_html5_audio.pause(); } catch(e) {}
+                                    window.__active_html5_audio = null;
                                 }
                                 window.__is_online_tts_active = false;
                                 synth.paused = false;
