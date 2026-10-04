@@ -1029,6 +1029,10 @@ class NovelTtsBridge(
                                     clearTimeout(webAudioDebounceTimer);
                                     webAudioDebounceTimer = null;
                                 }
+                                if (window.__cancel_stop_timer) {
+                                    clearTimeout(window.__cancel_stop_timer);
+                                    window.__cancel_stop_timer = null;
+                                }
 
                                 // If any HTML5 audio stream (Google/Edge TTS) was playing, pause it and reset
                                 if (window.__active_html5_audio) {
@@ -1076,6 +1080,19 @@ class NovelTtsBridge(
                                 synth.speaking = false;
                                 synth.paused = false;
                                 synth.pending = false;
+
+                                if (window.__cancel_stop_timer) {
+                                    clearTimeout(window.__cancel_stop_timer);
+                                    window.__cancel_stop_timer = null;
+                                }
+                                // If no new utterance is queued in this event cycle, user pressed Pause/Stop in Web UI!
+                                window.__cancel_stop_timer = setTimeout(function() {
+                                    if (!synth.speaking && (!window.__android_speech_queue || window.__android_speech_queue.length === 0)) {
+                                        if (window.AndroidTtsBridge && typeof window.AndroidTtsBridge.pauseFromWeb === 'function') {
+                                            window.AndroidTtsBridge.pauseFromWeb();
+                                        }
+                                    }
+                                }, 50);
                             } catch(e) {}
                         },
                         pause: function() {
